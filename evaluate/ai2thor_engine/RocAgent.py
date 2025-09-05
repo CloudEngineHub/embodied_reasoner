@@ -24,6 +24,27 @@ class RocAgent(BaseAgent):
     def __init__(self, controller, save_path="./data/", scene="FloorPlan203", 
                  visibilityDistance=1.5, gridSize=0.25, fieldOfView=90, target_objects=[], related_objects=[], navigable_objects=[], taskid=0,platform_type="GPU"):
         super().__init__(controller, scene, visibilityDistance, gridSize, fieldOfView,platform_type)
+        
+        # Web Dashboard logging integration
+        try:
+            import sys
+            import os
+            # Add evaluate directory to sys.path for web_dashboard import
+            evaluate_dir = os.path.join(os.path.dirname(__file__), '..')
+            if evaluate_dir not in sys.path:
+                sys.path.append(evaluate_dir)
+            
+            from web_dashboard import log_interaction, log_vlm_call
+            self._log_interaction = log_interaction
+            self._log_vlm_call = log_vlm_call
+            self._web_logging_enabled = True
+            print("Web Dashboard logging integration successful")
+        except ImportError as e:
+            self._log_interaction = lambda x: None
+            self._log_vlm_call = lambda x: None
+            self._web_logging_enabled = False
+            print(f"Web Dashboard logging integration failed: {e}")
+            
         self.env, self.executor, self.monitor, self.planner = self.build_agent()
         self.pre_navigate_location=""
         self.agent_state = []
@@ -35,7 +56,7 @@ class RocAgent(BaseAgent):
         self.navigable_objects = {}
         self.legal_interactions = {}
         self.current_container = None
-        self.objecttype2object={} # 可导航物体的type2obj
+        self.objecttype2object={} # navigable object type to object mapping
         self.action_space = {
             "init": self.init_agent_corner,
             "navigate to": self.navigate,
@@ -95,43 +116,43 @@ class RocAgent(BaseAgent):
     
     def predict_next_action(self, task):
         if self.state==RocAgent.STATE_OBSERVATION:
-            # 初始状态，根据观察和任务，状态转换为规划状态/思考状态
+            # Initial state, transition to planning/thinking state based on observation and task
             pass
         if self.state==RocAgent.STATE_PLANNING:
-            # 规划后，状态转换为决策状态
+            # After planning, transition to decision-making state
             pass
         if self.state==RocAgent.STATE_THINKING:
-            # 1.思考后，重新规划，状态转换为规划状态
-            # 2.思考后，不需要规划，状态转换为决策状态
-            # 3.思考任务已经执行完成，转为验证状态
+            # 1. After thinking, re-plan and transition to planning state
+            # 2. After thinking, no planning needed, transition to decision-making state
+            # 3. After thinking, task completed, transition to verification state
             pass
         if self.state==RocAgent.STATE_REFLECTION:
-            # 1.反思后可直接决策，状态转换为决策状态
-            # 2.反思后继续规划，状态转换为规划状态
+            # 1. After reflection, can make decision directly, transition to decision-making state
+            # 2. After reflection, continue planning, transition to planning state
             pass
         if self.state==RocAgent.STATE_DECISION_MAKING_STATE:
-            # 1.如果决策失败，状态转换为反思状态
-            # 2.如果决策成功，状态转换为思考状态
+            # 1. If decision fails, transition to reflection state
+            # 2. If decision succeeds, transition to thinking state
             pass
         if self.state==RocAgent.STATE_VERIFICATION:
-            # 1.验证成功后，状态转换为结束状态
-            # 2.验证失败，状态转换为反思状态
+            # 1. After successful verification, transition to end state
+            # 2. If verification fails, transition to reflection state
             pass
         if self.state==RocAgent.STATE_END:
-            # 结束状态
+            # End state
             pass
     
-    # 向目标物体走几个身位
+    # Move a few steps towards the target object
     def move_observation(self, target_item):
-        # 1. 调整agent的方向，使其前方存在目标物体
+        # 1. Adjust agent's direction so target object is in front
         self.adjust_view(target_item)
-        # 2. 计算物体和agent的距离，调整agent的位置
+        # 2. Calculate distance between object and agent, adjust agent's position
         distance = target_item["distance"]
-        # 2. 往目标物体移动几个身位
-        # 移动1/3的距离
+        # 2. Move several steps towards target object
+        # Move 1/3 of the distance
         self.action.action_mapping["moveAhead"](self.controller, round(distance/3, 1))
         self.update_event()
-        # 3. 调整agent的视野范围
+        # 3. Adjust agent's field of view
         self.adjust_agent_fieldOfView(120)
         self.update_event()
         self.update_legal_location()
@@ -143,11 +164,11 @@ class RocAgent(BaseAgent):
         scene_bounds6 = self.controller.last_event.metadata['sceneBounds']['cornerPoints'][6]
         scene_bounds7 = self.controller.last_event.metadata['sceneBounds']['cornerPoints'][7]
 
-        # 3. 获取agent可达位置
+        # 3. Get agent's reachable positions
         event = self.controller.step(dict(action='GetReachablePositions'))
         reachable_positions = event.metadata['actionReturn']
         pre_target_positions = []
-        # 4. 计算与四个点最近的可达位置
+        # 4. Calculate closest reachable positions to the four corner points
         min_distance = float("inf")
         for i, scene_bounds in enumerate([scene_bounds2, scene_bounds3, scene_bounds6, scene_bounds7]):
             for position in reachable_positions:
@@ -156,7 +177,7 @@ class RocAgent(BaseAgent):
                     min_distance = distance
                     target_position = position
                     index = i
-        # 5. 设置agent的旋转角度
+        # 5. Set agent's rotation angle
         if index == 0:
             # 180, 270
             target_rotation = dict(x=0, y=225, z=0)
@@ -170,7 +191,7 @@ class RocAgent(BaseAgent):
             # 0,90
             target_rotation = dict(x=0, y=45, z=0)
         
-        # 6. agent导航到可达位置
+        # 6. Navigate agent to reachable position
         while True:
             event = self.action.action_mapping["teleport"](self.controller, position=target_position, rotation=target_rotation, horizon=0)
             self.update_event()
@@ -181,7 +202,7 @@ class RocAgent(BaseAgent):
                 event = self.controller.step(dict(action='GetReachablePositions'))
                 reachable_positions = event.metadata['actionReturn']
                 
-                # 4. 计算与四个点最近的可达位置
+                # 4. Calculate closest reachable positions to the four corner points
                 min_distance = float("inf")
                 for i, scene_bounds in enumerate([scene_bounds2, scene_bounds3, scene_bounds6, scene_bounds7]):
                     for position in reachable_positions:
@@ -192,7 +213,7 @@ class RocAgent(BaseAgent):
                             min_distance = distance
                             target_position = position
                             index = i
-                # 5. 设置agent的旋转角度
+                # 5. Set agent's rotation angle
                 if index == 0:
                     # 180, 270
                     target_rotation = dict(x=0, y=225, z=0)
@@ -221,6 +242,15 @@ class RocAgent(BaseAgent):
         return image_fp, legal_navigations, legal_interactions
 
     def navigate(self, itemtype):
+        # Record navigation action start
+        if self._web_logging_enabled:
+            self._log_interaction({
+                'type': 'navigate',
+                'action': f'Navigate to {itemtype}',
+                'content': f'Start navigation to {itemtype}',
+                'step': getattr(self, 'step_count', 0)
+            })
+            
         image_fp, legal_navigations, legal_interactions = None, None, None
     
         # ORIGINAL CODE - PRESERVED FOR A/B TESTING AND COMPARISON
@@ -241,20 +271,39 @@ class RocAgent(BaseAgent):
         if hasattr(self, 'objecttype2indexed') and itemtype in self.objecttype2indexed:
             item = self.objecttype2indexed[itemtype]
         else:
-            # Check for multiple objects
+            # Check for multiple objects with position-based deduplication
             if itemtype in self.objecttype2object:
                 objects = self.objecttype2object[itemtype]
                 
-                if len(objects) > 1 and hasattr(self, 'enable_dialogue_system') and self.enable_dialogue_system:
-                    # Use VLM-based dialogue for disambiguation
-                    task_description = getattr(self, 'current_task_description', f"Navigate to {itemtype}")
-                    item = self.request_user_disambiguation(itemtype, objects, task_description)
-                elif len(objects) == 1:
-                    item = objects[0]
+                # Apply same deduplication logic as in indexing
+                position_to_obj = {}
+                for obj in objects:
+                    pos_key = (round(obj['position']['x'], 2), round(obj['position']['z'], 2))
+                    if pos_key not in position_to_obj:
+                        position_to_obj[pos_key] = obj
+                
+                unique_objects = list(position_to_obj.values())
+                
+                if len(unique_objects) > 1 and hasattr(self, 'enable_dialogue_system') and self.enable_dialogue_system:
+                    # ENHANCED (9.4): Use improved VLM-based dialogue for disambiguation
+                    try:
+                        item = self.request_user_disambiguation_improved(itemtype, unique_objects)
+                        # Robust fallback if disambiguation fails
+                        if item is None:
+                            print(f"[ERROR] Disambiguation failed for {itemtype}, using first object")
+                            item = unique_objects[0]
+                    except Exception as e:
+                        print(f"[ERROR] Disambiguation error for {itemtype}: {e}")
+                        item = unique_objects[0]
+                elif len(unique_objects) == 1:
+                    item = unique_objects[0]
+                    if len(objects) > 1:
+                        print(f"Deduplication: {len(objects)} {itemtype} objects at same position, using single representative")
                 else:
                     # Fallback to first object if dialogue disabled
-                    item = objects[0]
-                    print(f"Multiple {itemtype} found, using first one (dialogue disabled)")
+                    item = unique_objects[0] if unique_objects else objects[0]
+                    if len(objects) > len(unique_objects):
+                        print(f"Multiple {itemtype} found (deduplicated {len(objects)}→{len(unique_objects)}), using first one (dialogue disabled)")
             else:
                 # Handle original target_item_type2obj_id logic
                 if itemtype in self.target_item_type2obj_id:
@@ -270,10 +319,20 @@ class RocAgent(BaseAgent):
                     print(f"Error: No objects of type {itemtype} found")
                     return None, None, None
         
-        # 存储itemtype-非直接导航到的物品
+        # CRITICAL SAFETY CHECK: Ensure item is always defined
+        if 'item' not in locals() or item is None:
+            print(f"CRITICAL: item is undefined for {itemtype}, attempting emergency fallback")
+            if itemtype in self.objecttype2object and self.objecttype2object[itemtype]:
+                item = self.objecttype2object[itemtype][0]
+                print(f"✅ Emergency fallback successful: using {item['objectType']}")
+            else:
+                print(f"❌ Emergency fallback failed: no objects available")
+                return None, None, None
+        
+        # Store itemtype - items not directly navigated to
         navigate_obj_type=item["objectType"]
         
-        # 如果item是容器，如果容器上存在相关物体，并且容器是非封闭的状态，直接导航到该物体 "openable": 0, "isOpen": 0, 
+        # If item is a container, if there are related objects on the container, and the container is not closed, navigate directly to that object "openable": 0, "isOpen": 0, 
         if item.get("receptacle", False) and (not item["openable"]):
             for related_object in self.related_objects:
                 if related_object in item['receptacleObjectIds']:
@@ -283,12 +342,12 @@ class RocAgent(BaseAgent):
         # while(item['name'] == self.pre_navigate_location and len(self.objecttype2object[item['objectType']])>1):
         #     item = random.choice(self.objecttype2object[item['objectType']])
         # self.pre_navigate_location = item['name']
-        # 如果容器没打开，然后里面存在目标物体，就不能直接导航到目标物体
+        # If container is not open and has target objects inside, cannot navigate directly to target objects
         if item["objectId"] in self.objid2position:
             target_position = self.objid2position[item["objectId"]]["agent_teleport_position"]
             target_rotation = self.objid2position[item["objectId"]]["agent_rotation"]
             horizon = self.objid2position[item["objectId"]]["agent_cameraHorizon"]
-            print("设定位置", self.objid2position)
+            print("Set position", self.objid2position)
         else:
             target_position, target_rotation = self.compute_position_8(item, pre_target_positions=[])
             horizon = 60
@@ -297,7 +356,7 @@ class RocAgent(BaseAgent):
             print("teleport failed, no reachable positions")
             return image_fp, legal_navigations, legal_interactions
         event = self.action.action_mapping["teleport"](self.controller, position=target_position, rotation=target_rotation, horizon=horizon)
-        # 判断是否成功
+        # Check if successful
         pre_target_positions = []
         index = 0
         while not event.metadata['lastActionSuccess']:
@@ -317,6 +376,16 @@ class RocAgent(BaseAgent):
                                     "item": navigate_obj_type},
                                     prefix_save_path=self.result_dir)
         
+        # Record navigation completion
+        if self._web_logging_enabled:
+            success = image_fp is not None
+            self._log_interaction({
+                'type': 'navigate',
+                'action': f'Navigate to {navigate_obj_type} - {"Success" if success else "Failed"}',
+                'content': f'Navigation to {navigate_obj_type} {"successful" if success else "failed"}',
+                'image_path': image_fp if image_fp else '',
+                'step': getattr(self, 'step_count', 0)
+            })
         
         if item.get("receptacle", False) and "receptacleObjectIds" in item and (item['receptacleObjectIds'] != [] or item['receptacleObjectIds'] is not None):
             self.current_container = item
@@ -343,11 +412,11 @@ class RocAgent(BaseAgent):
             img1 = add_text_to_image(images[0], "left view", (10, images[0].shape[0] - 20))
             img2 = add_text_to_image(images[1], "back view", (10, images[1].shape[0] - 20))
             img3 = add_text_to_image(images[2], "right view", (10, images[2].shape[0] - 25))
-            # 为图片添加边框（注意：只给中间的图片添加左右边框）
+            # Add border to image (note: only add left and right borders to the middle image)
             img2_with_border = add_border(img2, 5, (0, 0, 0))
-            # 水平拼接
+            # Horizontal concatenation
             img_h_concat = np.concatenate((img1, img2_with_border, img3), axis=1)
-            # 保存结果
+            # Save result
             output_path = self.save_frame({"step_count": str(self.step_count),
                                             # "i": str(i),
                                             "action": "observe"},
@@ -367,10 +436,10 @@ class RocAgent(BaseAgent):
     def move_forward(self, distance=0.5):
         
         image_fp, legal_navigations, legal_interactions = None, None, None
-        # 寻找周围8个方向 哪个方向可探索的位置最多
+        # Find which of the 8 surrounding directions has the most explorable positions
         # reachablePositions=self.controller.step(action="GetReachablePositions")
         
-        # 转回0
+        # Turn back to 0
         # current_rotate=self.controller.last_event.metadata["agent"]["rotation"]["y"]
         # if current_rotate<0:
         #     self.action.action_mapping["rotate_right"](self.controller,degrees=abs(current_rotate))
@@ -387,8 +456,8 @@ class RocAgent(BaseAgent):
             legal_interactions = self.get_legal_interactions()
             return image_fp, legal_navigations, legal_interactions
         else:
-            # 左平移或者右平移 随机？
-            # 根据那个位置离目标物体更近
+            # Left or right movement, random?
+            # Based on which position is closer to the target object
             # import pdb;pdb.set_trace()
             if self.related_objects:
                 distance_right_list = []
@@ -402,16 +471,16 @@ class RocAgent(BaseAgent):
                 agentzright=self.controller.last_event.metadata["agent"]["position"]["z"]  
 
                 if errorMessage1=="":
-                    self.action.action_mapping["move_left"](self.controller, distance)#回到原位
+                    self.action.action_mapping["move_left"](self.controller, distance) # Return to original position
                     
-                self.action.action_mapping["move_left"](self.controller, distance)#左移动
+                self.action.action_mapping["move_left"](self.controller, distance) # Move left
                 print("RocAgent",self.controller.last_event)
                 errorMessage2=self.controller.last_event.metadata["errorMessage"]
                 agentxleft=self.controller.last_event.metadata["agent"]["position"]["x"]
                 agentzleft=self.controller.last_event.metadata["agent"]["position"]["z"] 
                 
                 if errorMessage2=="":
-                    self.action.action_mapping["move_right"](self.controller, distance)#回到原位
+                    self.action.action_mapping["move_right"](self.controller, distance) # Return to original position
                 
                 for obj_id in self.related_objects:
                     item = self.eventobject.get_object_by_id(self.controller.last_event,obj_id)
@@ -419,15 +488,15 @@ class RocAgent(BaseAgent):
                         itemx=item["position"]["x"]
                         itemz=item["position"]["z"]
                         
-                        # 计算右侧移动后的距离
+                        # Calculate distance after moving right
                         distance_right = math.sqrt((agentxright - itemx) ** 2 + (agentzright - itemz) ** 2)
                         distance_right_list.append(distance_right)
-                        # 计算左侧移动后的距离
+                        # Calculate distance after moving left
                         distance_left = math.sqrt((agentxleft - itemx) ** 2 + (agentzleft - itemz) ** 2)
                         distance_left_list.append(distance_left)
                    
-                if errorMessage1=="" and errorMessage2=="" and distance_right_list and distance_left_list:# 左右都能移动，选择移动后距离目标物体最近的方向
-                    # 1. 选择平均距离所有目标物体最小的方向
+                if errorMessage1=="" and errorMessage2=="" and distance_right_list and distance_left_list: # Both left and right can move, choose the direction that gets closest to target object after moving
+                    # 1. Choose direction with smallest average distance to all target objects
                     # avg_distance_right = sum(distance_right_list) / len(distance_right_list)
                     # avg_distance_left = sum(distance_left_list) / len(distance_left_list)
                     # if avg_distance_right < avg_distance_left:
@@ -435,7 +504,7 @@ class RocAgent(BaseAgent):
                     # else:
                     #     direction = "move_left"
                     
-                    # 2. 选择使最近物体距离最小的方向
+                    # 2. Choose direction that minimizes distance to closest object
                     
                     min_distance_right = min(distance_right_list)
                     min_distance_left = min(distance_left_list)
@@ -445,7 +514,7 @@ class RocAgent(BaseAgent):
                     else:
                         direction = "move_left"
                     
-                    #向direction侧移动后 距离n个目标物体中 其中1个最近 
+                    # After moving to direction side, distance to closest among n target objects 
                     self.action.action_mapping[direction](self.controller, distance)
                     if self.controller.last_event.metadata["errorMessage"]=="":
                         image_fp = self.save_frame({"step_count": str(self.step_count),
@@ -455,7 +524,7 @@ class RocAgent(BaseAgent):
                         legal_interactions = self.get_legal_interactions()
                         return image_fp, legal_navigations, legal_interactions  
                     
-                elif errorMessage1=="" or errorMessage2=="":  # 左右有一个方向能够移动，选择能够移动的方向
+                elif errorMessage1=="" or errorMessage2=="":  # One of left/right directions can move, choose the movable direction
                     if errorMessage1=="":
                         self.action.action_mapping["move_right"](self.controller, distance)
                         
@@ -472,7 +541,7 @@ class RocAgent(BaseAgent):
                         return image_fp, legal_navigations, legal_interactions
                 
                 else:
-                    self.action.action_mapping["move_back"](self.controller, distance)  # 向后移动
+                    self.action.action_mapping["move_back"](self.controller, distance)  # Move backward
                     print("RocAgent",self.controller.last_event)
                     if self.controller.last_event.metadata["errorMessage"]=="":
                         image_fp = self.save_frame({"step_count": str(self.step_count),
@@ -495,7 +564,7 @@ class RocAgent(BaseAgent):
                             legal_interactions = self.get_legal_interactions()
                             return image_fp, legal_navigations, legal_interactions
                         else:
-                            if errorMessage_rotate_right=="":#向左转
+                            if errorMessage_rotate_right=="": # Turn left
                                 self.action.action_mapping["rotate_left"](self.controller,degrees=180)
                             self.action.action_mapping["move_ahead"](self.controller, distance)
                             print("RocAgent",self.controller.last_event)
@@ -529,7 +598,7 @@ class RocAgent(BaseAgent):
                         legal_interactions = self.get_legal_interactions()
                         return image_fp, legal_navigations, legal_interactions
                     else:
-                        # # 左平移
+                        # # Left movement
                         # self.action.action_mapping["move_left"](self.controller, distance)
                         # print("RocAgent",self.controller.last_event)
                         # if self.controller.last_event.metadata["errorMessage"]=="":
@@ -539,7 +608,7 @@ class RocAgent(BaseAgent):
                         #     legal_navigations = self.get_legal_navigations()
                         #     legal_interactions = self.get_legal_interactions()
                         #     return image_fp, legal_navigations, legal_interactions
-                        self.action.action_mapping["move_back"](self.controller, distance)  # 向后移动
+                        self.action.action_mapping["move_back"](self.controller, distance)  # Move backward
                         print("RocAgent",self.controller.last_event)
                         if self.controller.last_event.metadata["errorMessage"]=="":
                             image_fp = self.save_frame({"step_count": str(self.step_count),
@@ -562,7 +631,7 @@ class RocAgent(BaseAgent):
                                 legal_interactions = self.get_legal_interactions()
                                 return image_fp, legal_navigations, legal_interactions
                             else:
-                                if errorMessage_rotate_right=="":#向左转
+                                if errorMessage_rotate_right=="": # Turn left
                                     self.action.action_mapping["rotate_left"](self.controller,degrees=180)
                                 self.action.action_mapping["move_ahead"](self.controller, distance)
                                 print("RocAgent",self.controller.last_event)
@@ -799,8 +868,8 @@ class RocAgent(BaseAgent):
             visible_objects.extend(d["visible_objects"])
             for obj in d["objects"]:
                 if not obj["name"].startswith("Floor_"):
-                    volume = obj.get("volum")  # 使用 get 方法避免 KeyError
-                    if volume is not None:  # 确保体积存在
+                    volume = obj.get("volum")  # Use get method to avoid KeyError
+                    if volume is not None:  # Ensure volume exists
                         if 0 <= volume < 0.01:
                             volumes["0-0.01"].append(obj["name"])   
                         elif 0.01 <= volume < 0.05: 
@@ -909,13 +978,13 @@ class RocAgent(BaseAgent):
                             isnavigable=True 
                         elif v>0.001 and d<1.5:
                             isnavigable=True
-                        elif d<1:#体积虽然小，但距离足够近
+                        elif d<1: # Volume is small but distance is close enough
                             isnavigable=True
                     else:
                         isnavigable=True
-                        if rate<=0.02:#体积虽然大，但是距离太远v/d
+                        if rate<=0.02: # Volume is large but distance is too far v/d
                             isnavigable=False
-                            if s>0.5 and d<10:# 排除面积的影响
+                            if s>0.5 and d<10: # Exclude area influence
                                 isnavigable=True
                             elif s>0.15 and d<4:
                                 isnavigable=True
@@ -925,7 +994,7 @@ class RocAgent(BaseAgent):
                                 isnavigable=True 
                             elif v>0.001 and d<1.5:
                                 isnavigable=True
-                            elif d<1:#体积虽然小，但距离足够近
+                            elif d<1: # Volume is small but distance is close enough
                                 isnavigable=True
                                 
                 volumes.append({
@@ -953,7 +1022,7 @@ class RocAgent(BaseAgent):
                 
         return res
     
-    # 全局可达位置
+    # Global reachable positions
     def get_legal_navigations(self):
         objects = self.get_navigate_location()
         for objectId, obj in objects.items():
@@ -972,7 +1041,7 @@ class RocAgent(BaseAgent):
         else:
             return []
 
-    # 全局可交互位置
+    # Global interactive positions
     def get_legal_interactions(self):
         legal_interactions = {}
         objects = self.get_navigate_location()
@@ -1050,11 +1119,11 @@ class RocAgent(BaseAgent):
                     if item is None:
                         return False, None, list(self.navigable_objects.keys()), list(self.legal_interactions.keys())
                     else:
-                        # 导航动作
+                        # Navigation action
                         if action_name == "navigate to" and item in self.navigable_objects:
                             image_fp, legal_locations, legal_objects = self.action_space[action_name](item)
                             return True, image_fp, legal_locations, legal_objects
-                        # 交互动作 # "put in" for MODE=API
+                        # Interactive action # "put in" for MODE=API
                         if action_name in ["pickup", "put", "put in","toggle", "open", "close"] and item in self.legal_interactions:
                             image_fp, legal_locations, legal_objects = self.action_space[action_name](item)
                             if self.controller.last_event.metadata["errorMessage"]!="":
@@ -1069,17 +1138,37 @@ class RocAgent(BaseAgent):
     # ======= ENHANCED NAVIGATION: Multi-object Disambiguation System =======
     
     def init_object_indexing(self):
-        """Create indexed mapping for duplicate objects"""
+        """Create indexed mapping for duplicate objects with position-based deduplication"""
         self.objecttype2indexed = {}
         
         for obj_type, objects in self.objecttype2object.items():
             if len(objects) > 1:
-                # Sort by position for consistent ordering
-                sorted_objs = sorted(objects, key=lambda o: (o['position']['x'], o['position']['z']))
-                for i, obj in enumerate(sorted_objs):
-                    indexed_name = f"{obj_type}_{i+1}"
-                    self.objecttype2indexed[indexed_name] = obj
-                    print(f"Object indexing: {indexed_name} at position ({obj['position']['x']:.2f}, {obj['position']['z']:.2f})")
+                # Deduplicate objects at the same position (AI2-THOR bug workaround)
+                position_to_obj = {}
+                for obj in objects:
+                    # Round position to handle floating point precision issues
+                    pos_key = (round(obj['position']['x'], 2), round(obj['position']['z'], 2))
+                    if pos_key not in position_to_obj:
+                        position_to_obj[pos_key] = obj
+                
+                # Sort deduplicated objects by position for consistent ordering
+                unique_objects = list(position_to_obj.values())
+                sorted_objs = sorted(unique_objects, key=lambda o: (o['position']['x'], o['position']['z']))
+                
+                # Only index if we still have multiple unique positions after deduplication
+                if len(sorted_objs) > 1:
+                    for i, obj in enumerate(sorted_objs):
+                        indexed_name = f"{obj_type}_{i+1}"
+                        self.objecttype2indexed[indexed_name] = obj
+                        print(f"Object indexing: {indexed_name} at position ({obj['position']['x']:.2f}, {obj['position']['z']:.2f})")
+                else:
+                    # All objects were at same position - just use the first one
+                    print(f"Deduplication: {len(objects)} {obj_type} objects collapsed to 1 unique position")
+            else:
+                # Single object - still add to indexed mapping for consistency
+                obj = objects[0]
+                indexed_name = f"{obj_type}_1"
+                self.objecttype2indexed[indexed_name] = obj
     
     def generate_spatial_description(self, obj, idx, all_objects):
         """Generate human-readable spatial description"""
@@ -1109,48 +1198,118 @@ class RocAgent(BaseAgent):
                     landmarks.append(other['objectType'].lower())
         return landmarks
     
-    def vlm_call(self, image_path, prompt):
-        """Call VLM for analysis with improved prompting"""
+    def vlm_call_with_logging(self, image_path, prompt, analysis_type="general"):
+        """Enhanced VLM call with comprehensive logging and monitoring"""
+        import time
+        start_time = time.time()
+        
+        # Preprocess log record
+        log_data = {
+            'type': 'vlm_analysis',
+            'analysis_type': analysis_type,
+            'image_path': image_path,
+            'prompt_length': len(prompt),
+            'prompt_preview': prompt[:200] + "..." if len(prompt) > 200 else prompt,
+            'full_prompt': prompt,  # Complete prompt for debugging
+            'step': getattr(self, 'step_count', 0),
+            'start_time': start_time,
+            'timestamp': time.strftime('%H:%M:%S')
+        }
+        
+        # print(f"Prompt Preview: {log_data['prompt_preview']}")
+        
+        if hasattr(self, '_log_vlm_call') and self._log_vlm_call:
+            self._log_vlm_call(log_data)
+        
         try:
-            import sys
-            import os
-            sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-            from VLMCall import VLMAPI
+            response = self._execute_vlm_request(image_path, prompt)
             
-            vlm = VLMAPI("Qwen/Qwen2-VL-7B-Instruct")
+            end_time = time.time()
+            duration = end_time - start_time
             
-            # Use simpler prompt to avoid repetition issues
-            simple_prompt = f"""Look at this kitchen scene. Task: {prompt}
-
-What objects do you see? Is there a credit card visible? Answer briefly:
-Objects: [list main objects]
-Credit card visible: Yes/No
-Confidence for task: [0-100]"""
+            log_data.update({
+                'success': True,
+                'response_length': len(response),
+                'response_preview': response[:200] + "..." if len(response) > 200 else response,
+                'full_response': response,  # Complete response for debugging
+                'duration': round(duration, 2),
+                'end_time': end_time,
+                'timestamp': time.strftime('%H:%M:%S')
+            })
             
-            img_url = vlm.encode_image_2(image_path)
-            messages = [
-                {"role": "system", "content": "You are analyzing a kitchen scene. Be concise."},
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": simple_prompt},
-                        {"type": "image_url", "image_url": {"url": img_url}}
-                    ]
-                }
-            ]
+            # print(f"VLM analysis completed - duration {duration:.2f}s")
+            # print(f"Response preview: {log_data['response_preview']}")
             
-            return vlm.vlm_request(messages)
+            # Send completion log to Dashboard
+            if hasattr(self, '_log_vlm_call') and self._log_vlm_call:
+                self._log_vlm_call(log_data)
+            
+            return response
             
         except Exception as e:
-            print(f"VLM call failed: {e}")
-            return "Objects: kitchen items\nCredit card visible: No\nConfidence for task: 25"
+            duration = time.time() - start_time
+            error_msg = str(e)
+            
+            log_data.update({
+                'success': False,
+                'error': error_msg,
+                'duration': round(duration, 2),
+                'timestamp': time.strftime('%H:%M:%S')
+            })
+            
+            print(f"VLM analysis failed - {error_msg}")
+            
+            # Send error log to Dashboard
+            if hasattr(self, '_log_vlm_call') and self._log_vlm_call:
+                self._log_vlm_call(log_data)
+            
+            # Return structured failure response
+            return f"Reasoning: VLM analysis failed due to technical error: {error_msg}\nConfidence: 25"
+
+    def _execute_vlm_request(self, image_path, prompt):
+        """Pure VLM execution without logging - core functionality with retry"""
+        import sys
+        import os
+        import time
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from VLMCall import VLMAPI
+        
+        vlm = VLMAPI("Qwen/Qwen2-VL-7B-Instruct")
+        
+        img_url = vlm.encode_image_2(image_path)
+        messages = [
+            {"role": "system", "content": "You are a household navigation agent analyzing scenes for task completion."},
+            {
+                "role": "user", 
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": img_url}}
+                ]
+            }
+        ]
+        
+        # Three retry mechanism
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    print(f"Retry: {attempt+1} times)")
+                    time.sleep(2)
+                return vlm.vlm_request(messages)
+            except Exception as e:
+                if attempt == 2:
+                    print(f"VLM anaylsis failed - {e}")
+                    raise e
+    
+    # Maintain backward compatible old interface
+    def vlm_call(self, image_path, prompt):
+        """Legacy VLM call interface - redirects to new architecture"""
+        return self.vlm_call_with_logging(image_path, prompt, "legacy_call")
     
     def analyze_candidates_with_vlm(self, task_description, candidates):
-        """Use VLM to analyze which candidate best matches the task"""
         analyses = []
         
         for i, obj in enumerate(candidates):
-            print(f"🔍 Analyzing candidate {i+1}: {obj['objectType']}_{i+1}")
+            print(f"[VLM] Analyzing candidate {i+1}: {obj['objectType']}_{i+1}")
             
             # Navigate to observe this candidate
             success = self.navigate_to_observe_candidate(obj)
@@ -1163,8 +1322,12 @@ Confidence for task: [0-100]"""
                 "task": task_description
             })
             
-            # Get VLM analysis
-            vlm_response = self.vlm_call(image_path, task_description)
+            # Get VLM analysis with detailed logging
+            vlm_response = self.vlm_call_with_logging(
+                image_path, 
+                task_description, 
+                analysis_type="candidate_analysis_legacy"
+            )
             
             # Extract confidence score
             confidence = 25  # Default
@@ -1215,11 +1378,9 @@ Confidence for task: [0-100]"""
         obj_type = candidates[0]['objectType']
         best = analyses[0]
         
-        message = f"""🤖 Agent: I found multiple {obj_type} options and need your help.
+        message = f"""Task: {task}
 
-Task: {task}
-
-I found {len(candidates)} {obj_type} objects in the room:
+There're {len(candidates)} {obj_type} objects in the room:
 
 """
         
@@ -1229,7 +1390,7 @@ I found {len(candidates)} {obj_type} objects in the room:
             message += f"  Analysis: {analysis['analysis'].split('Objects:')[1].split('Credit card visible:')[0].strip() if 'Objects:' in analysis['analysis'] else 'kitchen items'}\n"
             message += f"  Confidence: {analysis['confidence']}%\n\n"
         
-        message += f"""💡 I recommend Option {best['index']} ({obj_type}_{best['index']}) - it has the highest confidence ({best['confidence']}%).
+        message += f"""[VLM] I recommend Option {best['index']} ({obj_type}_{best['index']}) - it has the highest confidence ({best['confidence']}%).
 
 Please choose:"""
         
@@ -1237,7 +1398,7 @@ Please choose:"""
             message += f"\n  Type '{analysis['index']}' for {obj_type}_{analysis['index']}"
             
         message += f"\n  Type 'auto' to use my recommendation"
-        message += f"\n\n⏰ You have {self.user_response_timeout} seconds to respond."
+        message += f"\n\n  You have {self.user_response_timeout} seconds to respond."
         
         return message
     
@@ -1256,7 +1417,7 @@ Please choose:"""
                 response = sys.stdin.readline().strip()
                 return response
             else:
-                print(f"\n⏰ Timeout reached. Using auto-recommendation.")
+                print(f"\nTimeout reached. Using auto-recommendation.")
                 return "auto"
                 
         except Exception as e:
@@ -1265,36 +1426,40 @@ Please choose:"""
     
     def parse_user_response(self, response, candidates, analyses):
         """Parse user response with fallback to recommendation"""
-        if not response or response.lower().strip() in ['auto', 'recommend', 'best', '']:
-            print(f"✅ Using recommended option: {analyses[0]['object']['objectType']}_{analyses[0]['index']}")
+        # Convert response to string if it's an integer (from Web Dashboard)
+        if isinstance(response, int):
+            response = str(response)
+        
+        if not response or str(response).lower().strip() in ['auto', 'recommend', 'best', '']:
+            print(f"Using recommended option: {analyses[0]['object']['objectType']}_{analyses[0]['index']}")
             return analyses[0]['object']
         
-        response_clean = response.lower().strip()
+        response_clean = str(response).lower().strip()
         
         # Check for number responses (1, 2, 3, etc.)
         try:
             choice_num = int(response_clean)
             if 1 <= choice_num <= len(candidates):
                 selected = candidates[choice_num - 1]
-                print(f"✅ You selected option {choice_num}: {selected['objectType']}_{choice_num}")
+                print(f"You selected option {choice_num}: {selected['objectType']}_{choice_num}")
                 return selected
         except ValueError:
             pass
         
         # If cannot parse, use recommendation
-        print(f"❓ Could not understand '{response}'. Using recommended option.")
+        print(f"Could not understand '{response}'. Using recommended option.")
         return analyses[0]['object']
     
     def request_user_disambiguation(self, itemtype, candidates, task_description):
         """Main disambiguation flow"""
-        print(f"\n🎯 Starting disambiguation for {len(candidates)} {itemtype} objects...")
+        # print(f"\nStarting disambiguation for {len(candidates)} {itemtype} objects...")
         
         # Analyze all candidates with VLM
         analyses = self.analyze_candidates_with_vlm(task_description, candidates)
         
         # Check if confidence gap is large enough to auto-select
         if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
-            print(f"🎯 High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
+            print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
             return analyses[0]['object']
         
         # Generate and display disambiguation request
@@ -1310,6 +1475,1604 @@ Please choose:"""
     def set_task_description(self, description):
         """Set current task description for context"""
         self.current_task_description = description
+
+    # ============== Multi-view Observation for Large Objects ==============
+    
+    def needs_multi_view_observation(self, item):
+        try:
+            volume = self.eventobject.get_item_volume(self.controller.last_event, item['name'])
+            surface_area = self.eventobject.get_item_surface_area(self.controller.last_event, item['name'])
+            
+            # Threshold judgment
+            needs_multi_view = volume > 1.0 or surface_area > 2.0
+            
+            if needs_multi_view:
+                print(f"Large object detected: {item['objectType']}")
+                print(f"   Volume: {volume:.3f}m³, Surface Area: {surface_area:.3f}m²")
+                print(f"   → Multi-view observation needed")
+            
+            return needs_multi_view
+        except Exception as e:
+            print(f"[ERROR] Error checking object size: {e}")
+            return False
+    
+    def get_verified_observation_positions(self, item):
+        try:
+            current_pos = self.controller.last_event.metadata['agent']['position']
+            current_rot = self.controller.last_event.metadata['agent']['rotation']
+            
+            original_pos = {
+                'x': current_pos['x'],
+                'y': current_pos['y'], 
+                'z': current_pos['z']
+            }
+            original_rot = {
+                'x': current_rot['x'],
+                'y': current_rot['y'],
+                'z': current_rot['z']
+            }
+            
+            # print(f"Current agent position as original view: ({original_pos['x']:.2f}, {original_pos['z']:.2f})")
+            
+            event = self.controller.step(dict(
+                action='GetInteractablePoses', 
+                objectId=item['objectId']
+            ))
+            
+            if not event.metadata['lastActionSuccess']:
+                print(f"[ERROR] Failed to get interactable positions for {item['objectType']}")
+                return [(original_pos, original_rot)]
+            
+            all_positions = event.metadata['actionReturn']
+            item_pos = item['position']
+            
+            # Dynamically filter supplementary observation positions
+            all_distances = []
+            positions_with_distance = []
+            
+            for pos in all_positions:
+                distance_to_item = ((pos['x'] - item_pos['x'])**2 + (pos['z'] - item_pos['z'])**2)**0.5
+                all_distances.append(distance_to_item)
+                positions_with_distance.append((pos, distance_to_item))
+            
+            import numpy as np
+            all_distances = np.array(all_distances)
+            distance_20th = np.percentile(all_distances, 20)  # 20th percentile
+            distance_50th = np.percentile(all_distances, 50)  # 50th percentile
+            
+            # print(f"[DEBUG]   Distance distribution: 20th={distance_20th:.2f}m, 50th={distance_50th:.2f}m")
+            # print(f"[DEBUG]   Selecting positions in {distance_20th:.2f}m - {distance_50th:.2f}m range")
+            
+            suitable_positions = []
+            min_distance_from_original = max(0.5, distance_20th * 0.5)  # Minimum distance from original position
+            
+            for pos, distance_to_item in positions_with_distance:
+                # Check if within ideal distance range
+                if not (distance_20th <= distance_to_item <= distance_50th):
+                    continue
+                    
+                # Check distance from original position (avoid duplicate viewpoints)
+                distance_to_original = ((pos['x'] - original_pos['x'])**2 + (pos['z'] - original_pos['z'])**2)**0.5
+                if distance_to_original < min_distance_from_original:
+                    continue
+                
+                suitable_positions.append(pos)
+            
+            print(f"[DEBUG]  Found {len(all_positions)} total positions, {len(suitable_positions)} suitable for supplementary views")
+            
+            # Select 2 positions with best angle distribution from supplementary positions
+            if len(suitable_positions) >= 2:
+                supplementary_positions = self.select_best_distributed_positions(
+                    suitable_positions, item_pos, max_positions=2, exclude_angle=self.calculate_angle(original_pos, item_pos)
+                )
+            elif len(suitable_positions) == 1:
+                # Only one supplementary position
+                supplementary_pos = suitable_positions[0]
+                supplementary_rot = self.calculate_look_at_rotation(supplementary_pos, item_pos)
+                supplementary_positions = [(supplementary_pos, supplementary_rot)]
+            else:
+                # No suitable supplementary positions
+                supplementary_positions = []
+            
+            # 5. Combine final results: original position + supplementary positions
+            final_positions = [(original_pos, original_rot)]  # First is always original interaction position
+            final_positions.extend(supplementary_positions)
+            
+            print(f"   ✅ Final multi-view strategy:")
+            print(f"     • View 1: Original interaction position (interaction optimized)")
+            for i, (pos, rot) in enumerate(supplementary_positions, 2):
+                angle = self.calculate_angle(pos, item_pos)
+                distance = ((pos['x'] - item_pos['x'])**2 + (pos['z'] - item_pos['z'])**2)**0.5
+                print(f"     • View {i}: Supplementary position at {angle:.1f}°, distance {distance:.2f}m")
+            
+            return final_positions
+            
+        except Exception as e:
+            print(f"[ERROR] Error getting observation positions: {e}")
+            # Return at least original position when error occurs
+            try:
+                original_pos, original_rot = self.compute_position_8(item, [])
+                if original_pos:
+                    return [(original_pos, original_rot)]
+            except:
+                pass
+            return []
+    
+    def calculate_angle(self, observer_pos, target_pos):
+        import math
+        angle = math.atan2(
+            observer_pos['z'] - target_pos['z'], 
+            observer_pos['x'] - target_pos['x']
+        )
+        return (math.degrees(angle) + 360) % 360
+    
+    def select_best_distributed_positions(self, suitable_positions, item_center, max_positions=3, exclude_angle=None):
+        import math
+        
+        if len(suitable_positions) <= max_positions:
+            # If not many candidate positions, use all of them
+            return [(pos, self.calculate_look_at_rotation(pos, item_center)) 
+                    for pos in suitable_positions]
+        
+        # 1. Calculate angle of each position relative to object center
+        position_angles = []
+        for pos in suitable_positions:
+            angle = self.calculate_angle(pos, item_center)
+            
+            distance = math.sqrt(
+                (pos['x'] - item_center['x'])**2 + 
+                (pos['z'] - item_center['z'])**2
+            )
+            
+            position_angles.append({
+                'position': pos,
+                'angle': angle,
+                'distance': distance
+            })
+        
+        # 2. Use improved greedy algorithm (considering exclusion angles)
+        selected = self.greedy_angle_selection_with_exclusion(position_angles, max_positions, exclude_angle)
+        
+        # 3. Calculate rotation angle for each selected position
+        result = []
+        for pos_info in selected:
+            pos = pos_info['position']
+            rotation = self.calculate_look_at_rotation(pos, item_center)
+            result.append((pos, rotation))
+            
+            print(f"   Selected view: pos=({pos['x']:.2f}, {pos['z']:.2f}), "
+                  f"angle={pos_info['angle']:.1f}°, distance={pos_info['distance']:.2f}m")
+        
+        return result
+    
+    def greedy_angle_selection_with_exclusion(self, position_angles, max_positions, exclude_angle=None):
+        """
+        Improved greedy algorithm: consider optimal distribution after excluding specific angles
+        exclude_angle: Already occupied angle (original interaction position)
+        """
+        if len(position_angles) <= max_positions:
+            return position_angles
+        
+        if exclude_angle is None:
+            # No exclusion angle, use original algorithm
+            return self.greedy_angle_selection(position_angles, max_positions)
+        
+        # Calculate ideal supplementary angles
+        if max_positions == 2:
+            # Need to select 2 supplementary positions, ideally forming 120° intervals
+            ideal_angles = [(exclude_angle + 120) % 360, (exclude_angle + 240) % 360]
+        elif max_positions == 1:
+            # Only need 1 supplementary position, choose 180° opposite
+            ideal_angles = [(exclude_angle + 180) % 360]
+        else:
+            # General case: uniform distribution
+            angle_step = 360 / (max_positions + 1)  # +1 because need to consider exclusion angle
+            ideal_angles = []
+            for i in range(1, max_positions + 1):
+                ideal_angles.append((exclude_angle + i * angle_step) % 360)
+        
+        print(f"   Excluding original angle {exclude_angle:.1f}°, targeting supplementary angles: {[f'{a:.1f}°' for a in ideal_angles]}")
+        
+        # Find closest actual position for each ideal angle
+        selected = []
+        used_positions = set()
+        
+        for ideal_angle in ideal_angles:
+            best_match = None
+            min_angle_diff = float('inf')
+            
+            for i, pos_info in enumerate(position_angles):
+                if i in used_positions:
+                    continue
+                
+                # Calculate angle difference (considering 360° cycle)
+                angle_diff = min(
+                    abs(pos_info['angle'] - ideal_angle),
+                    abs(pos_info['angle'] - ideal_angle + 360),
+                    abs(pos_info['angle'] - ideal_angle - 360)
+                )
+                
+                if angle_diff < min_angle_diff:
+                    min_angle_diff = angle_diff
+                    best_match = i
+            
+            if best_match is not None:
+                selected.append(position_angles[best_match])
+                used_positions.add(best_match)
+        
+        return selected
+    
+    def greedy_angle_selection(self, position_angles, max_positions):
+        if len(position_angles) <= max_positions:
+            return position_angles
+        
+        # Uniformly divide 360° and select closest positions
+        target_angles = [i * 360 / max_positions for i in range(max_positions)]
+        
+        # Find closest actual position for each target angle
+        selected = []
+        used_positions = set()
+        
+        for target_angle in target_angles:
+            best_match = None
+            min_angle_diff = float('inf')
+            
+            for i, pos_info in enumerate(position_angles):
+                if i in used_positions:
+                    continue
+                    
+                # Calculate angle difference (considering 360° cycle)
+                angle_diff = min(
+                    abs(pos_info['angle'] - target_angle),
+                    abs(pos_info['angle'] - target_angle + 360),
+                    abs(pos_info['angle'] - target_angle - 360)
+                )
+                
+                if angle_diff < min_angle_diff:
+                    min_angle_diff = angle_diff
+                    best_match = i
+            
+            if best_match is not None:
+                selected.append(position_angles[best_match])
+                used_positions.add(best_match)
+        
+        return selected
+    
+    def calculate_look_at_rotation(self, observer_pos, target_pos):
+        """
+        Calculate rotation angle from observation position looking towards target position
+        """
+        import math
+        
+        dx = target_pos['x'] - observer_pos['x']
+        dz = target_pos['z'] - observer_pos['z']
+        
+        # Calculate facing angle
+        angle_rad = math.atan2(dx, dz)
+        angle_deg = math.degrees(angle_rad)
+        
+        # Convert to AI2Thor rotation format
+        rotation = {
+            'x': 0,
+            'y': (angle_deg + 360) % 360,
+            'z': 0
+        }
+        
+        return rotation
+    
+    def navigate_complete_view(self, itemtype):
+        # print(f"[DEBUG] Starting multi-view observation for {itemtype}")
+        
+        # Get target object (using task 1 enhanced logic)
+        if itemtype in self.objecttype2object:
+            objects = self.objecttype2object[itemtype]
+            
+            if len(objects) > 1 and self.enable_dialogue_system:
+                task_description = getattr(self, 'current_task_description', f"observe {itemtype}")
+                item = self.request_user_disambiguation(itemtype, objects, task_description)
+            else:
+                item = objects[0]
+        else:
+            print(f"[Warning] No objects of type {itemtype} found")
+            return None, None, None
+        
+        # Determine if multi-angle observation is needed
+        if self.needs_multi_view_observation(item):
+            print(f"[DEBUG] Initiating multi-view observation...")
+            
+            # Get optimized observation positions
+            positions = self.get_verified_observation_positions(item)
+            if not positions:
+                print(f"[Warning] No suitable observation positions, falling back to standard navigation")
+                return self.navigate(itemtype)
+            
+            # Observe each position sequentially (improved strategy)
+            best_observation = None
+            successful_views = 0
+            
+            for i, (pos, rot) in enumerate(positions):
+                view_type = "Interaction" if i == 0 else f"Observation"
+                print(f"\nNavigating to view {i+1}/{len(positions)} ({view_type})...")
+                
+                try:
+                    # Navigate to observation position
+                    event = self.action.action_mapping["teleport"](
+                        self.controller,
+                        position=pos,
+                        rotation=rot,
+                        horizon=0
+                    )
+                    
+                    if event.metadata['lastActionSuccess']:
+                        print(f"   ✅ Navigation successful!")
+                        
+                        
+                        
+                        # Save observation image, distinguish viewpoint type
+                        view_type_label = "interaction" if i == 0 else "supplementary"
+                        image_fp = self.save_frame({
+                            "step_count": str(self.step_count),
+                            "action": "multi_view_observation",
+                            "item": item["objectType"],
+                            "view": i + 1,
+                            "view_type": view_type_label,
+                            "total_views": len(positions)
+                        })
+                        
+                        print(f"   Image saved: {image_fp}")
+                        best_observation = image_fp  # Update best observation result
+                        successful_views += 1
+                        
+                    else:
+                        print(f"   ❌ Navigation failed")
+                        
+                except Exception as e:
+                    print(f"   ❌ Error during navigation: {e}")
+            
+            print(f"\nMulti-view observation complete:")
+            print(f"   • Total positions attempted: {len(positions)}")
+            print(f"   • Successful observations: {successful_views}")
+            print(f"   • Success rate: {successful_views/len(positions)*100:.1f}%")
+            print(f"   • Strategy: Original interaction + {len(positions)-1} supplementary views")
+            
+            if best_observation:
+                return best_observation, True, True
+            else:
+                print(f"[ERROR] All multi-view attempts failed, falling back to standard navigation")
+                return self.navigate(itemtype)
+        
+        else:
+            print(f"Small object detected, using standard single-view navigation")
+            return self.navigate(itemtype)
+    
+    def enable_enhanced_navigation(self, enable_indexing=True, enable_dialogue=False, enable_multi_view=True):
+        """
+        Enable enhanced navigation functionality
+        """
+        self.enable_object_indexing = enable_indexing
+        self.enable_dialogue_system = enable_dialogue  
+        self.enable_multi_view = enable_multi_view
+        
+        print(f"⚙️ Enhanced Navigation Configuration:")
+        print(f"  • Object Indexing: {'✅' if enable_indexing else '❌'}")
+        print(f"  • Dialogue System: {'✅' if enable_dialogue else '❌'}")
+        print(f"  • Multi-view Observation: {'✅' if enable_multi_view else '❌'}")
+        
+        # Reinitialize object index
+        if enable_indexing:
+            self.init_object_indexing()
+
+    # ==================== NEW FEATURES ADDED 2025.9.4 ====================
+    
+    def create_vlm_dialogue_visualization(self, obj_type, index, input_prompt, input_image_path, vlm_response, confidence, analysis_info=None):
+        """
+        (9.4) Create a comprehensive visualization of VLM dialogue for debugging and review
+        Creates a composite image showing: input image + prompt text + VLM response
+        """
+        import cv2
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
+        import textwrap
+        
+        try:
+            input_img = cv2.imread(input_image_path)
+            if input_img is None:
+                print(f"Warning: Could not load image {input_image_path}")
+                return None
+                
+            input_img_rgb = cv2.cvtColor(input_img, cv2.COLOR_BGR2RGB)
+            h_img, w_img = input_img_rgb.shape[:2]
+            
+            # Create text sections
+            sections = {
+                'title': f"VLM DIALOGUE RECORD - {obj_type}_{index}",
+                'input_prompt': input_prompt,
+                'vlm_response': vlm_response,
+                'confidence': f"Extracted Confidence: {confidence}%",
+                'metadata': f"Timestamp: {self.get_timestamp()} | Object: {obj_type}_{index} | Task: {getattr(self, 'current_task', 'N/A')}"
+            }
+            
+            # Calculate text area dimensions
+            text_width = max(w_img, 800)  # At least 800px wide for text
+            char_width, char_height = 8, 16
+            
+            # Calculate heights for each section
+            title_lines = 2
+            prompt_lines = max(8, len(textwrap.wrap(sections['input_prompt'], width=text_width//char_width)))
+            response_lines = max(6, len(textwrap.wrap(sections['vlm_response'], width=text_width//char_width)))
+            confidence_lines = 2
+            metadata_lines = 2
+            
+            total_text_height = (title_lines + prompt_lines + response_lines + confidence_lines + metadata_lines + 8) * char_height
+            
+            # Create composite image
+            total_width = max(w_img, text_width)
+            total_height = h_img + total_text_height + 20  # 20px padding
+            
+            composite = np.ones((total_height, total_width, 3), dtype=np.uint8) * 255  # White background
+            
+            # Place input image (resize if too large)
+            if w_img > total_width:
+                # Resize image to fit width
+                scale = total_width / w_img
+                new_w, new_h = int(w_img * scale), int(h_img * scale)
+                input_img_rgb = cv2.resize(input_img_rgb, (new_w, new_h))
+                h_img, w_img = new_h, new_w
+            
+            # Center image horizontally
+            x_offset = (total_width - w_img) // 2
+            composite[10:10+h_img, x_offset:x_offset+w_img] = input_img_rgb
+            
+            # Convert to PIL for text rendering
+            pil_image = Image.fromarray(composite)
+            draw = ImageDraw.Draw(pil_image)
+            
+            # Try to use a monospace font, fallback to default
+            try:
+                font_large = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 16)
+                font_normal = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 12)
+                font_small = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 10)
+            except:
+                font_large = ImageFont.load_default()
+                font_normal = ImageFont.load_default()
+                font_small = ImageFont.load_default()
+            
+            # Draw text sections
+            y_start = h_img + 30
+            current_y = y_start
+            
+            # Title
+            draw.text((10, current_y), sections['title'], fill=(0, 0, 0), font=font_large)
+            current_y += 40
+            
+            # Draw separator
+            draw.line((10, current_y, total_width-10, current_y), fill=(200, 200, 200), width=2)
+            current_y += 15
+            
+            # Input Prompt
+            draw.text((10, current_y), "INPUT PROMPT:", fill=(0, 100, 0), font=font_normal)
+            current_y += 20
+            
+            wrapped_prompt = textwrap.wrap(sections['input_prompt'], width=90)
+            for line in wrapped_prompt:
+                draw.text((15, current_y), line, fill=(0, 0, 0), font=font_small)
+                current_y += 14
+            
+            current_y += 10
+            
+            # VLM Response
+            draw.text((10, current_y), "VLM RESPONSE:", fill=(0, 0, 100), font=font_normal)
+            current_y += 20
+            
+            wrapped_response = textwrap.wrap(sections['vlm_response'], width=90)
+            for line in wrapped_response:
+                draw.text((15, current_y), line, fill=(0, 0, 0), font=font_small)
+                current_y += 14
+            
+            current_y += 10
+            
+            # Confidence
+            draw.text((10, current_y), sections['confidence'], fill=(100, 0, 0), font=font_normal)
+            current_y += 20
+            
+            # Metadata
+            draw.text((10, current_y), sections['metadata'], fill=(100, 100, 100), font=font_small)
+            
+            # Convert back to OpenCV format and save
+            final_image = np.array(pil_image)
+            final_image_bgr = cv2.cvtColor(final_image, cv2.COLOR_RGB2BGR)
+            
+            # Save visualization
+            viz_path = f"{self.result_dir}/vlm_dialogue_viz_{obj_type}_{index}_{self.step_count}.png"
+            cv2.imwrite(viz_path, final_image_bgr)
+            
+            print(f"VLM dialogue visualization saved: {viz_path}")
+            return viz_path
+            
+        except Exception as e:
+            print(f"Error creating VLM visualization: {e}")
+            return None
+    
+    def get_timestamp(self):
+        """(9.4) Get current timestamp for logging"""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    def set_task_context(self, task_description, subtasks=None, task_type=None):
+        """
+        (9.4) Set task context information for dynamic prompt generation
+        """
+        self.current_task = task_description
+        self.current_subtasks = subtasks if subtasks else []
+        self.task_context = {
+            'task': task_description,
+            'subtasks': subtasks,
+            'task_type': task_type,  # e.g., 'pick_and_place', 'search', 'navigate'
+            'target_objects': self.extract_objects_from_task(task_description)
+        }
+        print(f"Task context set:")
+        print(f"   Main task: {task_description}")
+        if subtasks:
+            print(f"   Subtasks: {', '.join(subtasks)}")
+    
+    def extract_objects_from_task(self, task_description):
+        """(9.4) Extract target objects from task description using keyword matching"""
+        common_objects = [
+            'creditcard', 'bowl', 'cup', 'plate', 'knife', 'fork', 'spoon',
+            'apple', 'bread', 'tomato', 'potato', 'egg', 'lettuce', 'mug',
+            'bottle', 'can', 'box', 'book', 'key', 'phone', 'remote',
+            'pen', 'pencil', 'paper', 'cloth', 'towel', 'soap'
+        ]
+        
+        task_lower = task_description.lower()
+        found_objects = []
+        for obj in common_objects:
+            if obj in task_lower:
+                found_objects.append(obj)
+        return found_objects
+    
+    def generate_vlm_prompt_improved(self, obj_type, candidate_index):
+        """(9.4) Improved VLM prompt generation - direct and task-focused"""
+        
+        # Direct prompt without complex object extraction
+        main_task = getattr(self, 'current_task', 'Navigation task')
+        subtasks = getattr(self, 'current_subtasks', [])
+        
+        prompt = f"""You are a household agent carrying out specific tasks. Your task: "{main_task}"
+
+You need to choose between multiple {obj_type} objects. Currently you are looking at {obj_type}_{candidate_index}.
+
+Question: How likely is it that this {obj_type} contains or is related to what you're looking for?
+
+You may consider:
+- What you can see in/on/around this {obj_type}
+- Whether this type of {obj_type} typically stores the target item
+- Any visual clues that suggest the target might be here
+
+Give a confidence score (0-100) and explain your reasoning.
+
+Format:
+Reasoning: [why this location is promising or not for finding the target]
+Confidence: [0-100]"""
+        
+        return prompt
+    
+    def generate_vlm_prompt(self, obj_type, candidate_index):
+        """(9.4) Dynamic VLM prompt generation based on task context - DEPRECATED, use improved version"""
+        # Keep old version for compatibility but mark as deprecated
+        return self.generate_vlm_prompt_improved(obj_type, candidate_index)
+    
+    def estimate_bounding_box_from_visibility(self, obj):
+        """Estimate bounding box from object position and size - CloudRendering compatible"""
+        try:
+            # Get object dimensions and position
+            if 'axisAlignedBoundingBox' in obj:
+                bbox = obj['axisAlignedBoundingBox']
+                size = bbox['size']
+                
+                # Estimate screen space bounding box based on object size
+                # This is a rough approximation for CloudRendering compatibility
+                width_factor = min(max(size['x'] * 50, 80), 200)  # Scale factor
+                height_factor = min(max(size['y'] * 50, 60), 150)
+                
+                # Center on screen (rough estimate)
+                screen_width, screen_height = 400, 225  # Image dimensions
+                center_x, center_y = screen_width // 2, screen_height // 2
+                
+                # Create bounding box
+                x1 = max(0, center_x - width_factor // 2)
+                y1 = max(0, center_y - height_factor // 2)
+                x2 = min(screen_width, center_x + width_factor // 2)
+                y2 = min(screen_height, center_y + height_factor // 2)
+                
+                return (int(x1), int(y1), int(x2), int(y2))
+            
+            # Fallback: default bounding box
+            return (100, 50, 300, 175)
+            
+        except Exception as e:
+            print(f"[ERROR] Bounding box estimation failed: {e}")
+            return None
+
+    def get_object_bounding_box_2d(self, obj):
+        """(9.4) Get object 2D bounding box using AI2-THOR's built-in instance_detections2D"""
+        try:
+            # Use AI2-THOR's built-in 2D instance detection (now enabled with renderInstanceSegmentation=True)
+            if hasattr(self.controller.last_event, 'instance_detections2D'):
+                detections = self.controller.last_event.instance_detections2D
+                
+                if obj['objectId'] in detections:
+                    bbox = detections[obj['objectId']]
+                    print(f"Found 2D detection for {obj['objectId']}: {bbox}")
+                    
+                    # Handle different possible formats of bounding box data
+                    if isinstance(bbox, list) and len(bbox) >= 4:
+                        # Format: [x1, y1, x2, y2] or [x, y, width, height]
+                        x1, y1, x2, y2 = bbox[:4]
+                        # Ensure we have proper min/max coordinates
+                        return {
+                            'x_min': int(min(x1, x2)),
+                            'y_min': int(min(y1, y2)),
+                            'x_max': int(max(x1, x2)),
+                            'y_max': int(max(y1, y2))
+                        }
+                    elif isinstance(bbox, dict):
+                        # Handle dictionary format
+                        return {
+                            'x_min': int(bbox.get('x_min', bbox.get('x', 0))),
+                            'y_min': int(bbox.get('y_min', bbox.get('y', 0))),
+                            'x_max': int(bbox.get('x_max', bbox.get('x', 0) + bbox.get('width', 100))),
+                            'y_max': int(bbox.get('y_max', bbox.get('y', 0) + bbox.get('height', 100)))
+                        }
+                else:
+                    print(f"[ERROR] Object {obj['objectId']} not found in instance_detections2D")
+            else:
+                print("[ERROR] instance_detections2D not available in last_event")
+            
+            # Fallback 1: Try to refresh detection data with a minimal action
+            print("Refreshing detection data...")
+            event = self.controller.step(action="Pass")  # No-op action to refresh data
+            
+            if hasattr(event, 'instance_detections2D') and obj['objectId'] in event.instance_detections2D:
+                bbox = event.instance_detections2D[obj['objectId']]
+                print(f"✅ Found 2D detection after refresh: {bbox}")
+                if isinstance(bbox, list) and len(bbox) >= 4:
+                    x1, y1, x2, y2 = bbox[:4]
+                    return {
+                        'x_min': int(min(x1, x2)),
+                        'y_min': int(min(y1, y2)),
+                        'x_max': int(max(x1, x2)),
+                        'y_max': int(max(y1, y2))
+                    }
+            
+            # Fallback 2: Use reasonable default based on object visibility
+            if obj.get('visible', False):
+                print(f"Using fallback bounding box for visible object {obj['objectId']}")
+                frame_height, frame_width = self.controller.last_event.frame.shape[:2]
+                # Create a reasonable-sized box in the center
+                center_x, center_y = frame_width // 2, frame_height // 2
+                box_width, box_height = min(200, frame_width // 3), min(150, frame_height // 3)
+                
+                return {
+                    'x_min': max(0, center_x - box_width // 2),
+                    'y_min': max(0, center_y - box_height // 2),
+                    'x_max': min(frame_width, center_x + box_width // 2),
+                    'y_max': min(frame_height, center_y + box_height // 2)
+                }
+            
+            print(f"❌ No bounding box available for {obj['objectId']}")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error getting 2D bounding box for {obj.get('objectId', 'unknown')}: {e}")
+            return None
+    
+    def project_3d_bbox_to_2d(self, obj):
+        """(9.4) Project 3D bounding box to 2D screen coordinates (fallback method)"""
+        try:
+            # Get object 3D bounding box
+            bbox_3d = obj.get('axisAlignedBoundingBox', {})
+            if not bbox_3d:
+                return None
+            
+            # Simple projection approximation
+            # This is a basic implementation - you might want to use proper camera projection
+            center = bbox_3d.get('center', {})
+            size = bbox_3d.get('size', {})
+            
+            if not center or not size:
+                return None
+            
+            # Estimate 2D box based on object visibility and distance
+            frame_height, frame_width = self.controller.last_event.frame.shape[:2]
+            
+            # Basic projection (simplified)
+            estimated_width = min(200, frame_width // 4)  # Arbitrary estimation
+            estimated_height = min(150, frame_height // 4)
+            
+            center_x = frame_width // 2
+            center_y = frame_height // 2
+            
+            return {
+                'x_min': max(0, center_x - estimated_width // 2),
+                'y_min': max(0, center_y - estimated_height // 2),
+                'x_max': min(frame_width, center_x + estimated_width // 2),
+                'y_max': min(frame_height, center_y + estimated_height // 2)
+            }
+            
+        except Exception as e:
+            print(f"Error in 3D to 2D projection: {e}")
+            return None
+    
+    def draw_bounding_box(self, image, bbox, label, color=(0, 255, 0), thickness=3):
+        """(9.4) Draw bounding box and label on image"""
+        import cv2
+        
+        if bbox is None:
+            print(f"[ERROR] No bounding box to draw for {label}")
+            return image
+            
+        image_copy = image.copy()
+        
+        try:
+            # Handle both dictionary and tuple formats
+            if isinstance(bbox, dict):
+                x1, y1 = bbox['x_min'], bbox['y_min']
+                x2, y2 = bbox['x_max'], bbox['y_max']
+            elif isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                x1, y1, x2, y2 = bbox[:4]
+            else:
+                print(f"[ERROR] Invalid bounding box format for {label}: {bbox}")
+                return image
+            
+            print(f"Drawing bounding box for {label}: ({x1}, {y1}) to ({x2}, {y2})")
+            
+            # Draw rectangle
+            cv2.rectangle(
+                image_copy,
+                (int(x1), int(y1)),  # x1, y1
+                (int(x2), int(y2)),  # x2, y2
+                color,
+                thickness
+            )
+        
+            # Add label background
+            label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            cv2.rectangle(
+                image_copy,
+                (int(x1), int(y1) - label_size[1] - 10),
+                (int(x1) + label_size[0] + 10, int(y1)),
+                color,
+                -1
+            )
+            
+            # Add label text
+            cv2.putText(
+                image_copy,
+                label,
+                (int(x1) + 5, int(y1) - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2
+            )
+            
+        except Exception as e:
+            print(f"❌ Error drawing bounding box for {label}: {e}")
+        
+        return image_copy
+    
+    def generate_candidate_images_with_boxes(self, candidates):
+        """(9.4) Generate images with bounding boxes for each candidate object"""
+        import cv2
+        import numpy as np
+        
+        self.candidate_images = []
+        
+        for i, obj in enumerate(candidates):
+            obj_type = obj['objectType']
+            print(f"Capturing image for {obj_type}_{i+1}")
+            
+            # Navigate to observe this candidate
+            success = self.navigate_to_observe_candidate(obj)
+            if not success:
+                print(f"   ❌ Failed to navigate to {obj_type}_{i+1}")
+                continue
+            
+            # Get current frame
+            frame = self.controller.last_event.frame
+            
+            # Get object bounding box
+            bbox_2d = self.get_object_bounding_box_2d(obj)
+            
+            # Draw bounding box on image
+            if bbox_2d:
+                # Choose color: Green for first, Blue for others
+                color = (0, 255, 0) if i == 0 else (255, 0, 0)
+                image_with_box = self.draw_bounding_box(
+                    frame, 
+                    bbox_2d, 
+                    label=f"{obj_type}_{i+1}",
+                    color=color
+                )
+                print(f"   ✅ Bounding box drawn for {obj_type}_{i+1}")
+            else:
+                image_with_box = frame
+                print(f"   [ERROR] No bounding box for {obj_type}_{i+1}, using plain image")
+            
+            # Save image
+            image_path = self.save_frame({
+                "step_count": str(self.step_count),
+                "candidate": f"{obj_type}_{i+1}",
+                "with_box": bbox_2d is not None,
+                "action": "candidate_capture"
+            })
+            
+            # Overwrite with the boxed version
+            cv2.imwrite(image_path, cv2.cvtColor(image_with_box, cv2.COLOR_RGB2BGR))
+            
+            self.candidate_images.append({
+                'index': i+1,
+                'object': obj,
+                'image_path': image_path,
+                'has_box': bbox_2d is not None,
+                'bbox': bbox_2d
+            })
+            
+            print(f"   Image saved: {image_path}")
+        
+        print(f"Generated {len(self.candidate_images)} candidate images")
+        return self.candidate_images
+    
+    def create_candidate_comparison_image(self, analyses):
+        """(9.4) Create side-by-side comparison of all candidate objects"""
+        import cv2
+        import numpy as np
+        
+        if not analyses:
+            return None
+        
+        images = []
+        max_height = 0
+        
+        for analysis in analyses:
+            try:
+                img = cv2.imread(analysis['image_path'])
+                if img is None:
+                    print(f"Warning: Could not load {analysis['image_path']}")
+                    continue
+                
+                height, width = img.shape[:2]
+                
+                # Create title bar
+                title_bar_height = 60
+                title_bar = np.zeros((title_bar_height, width, 3), dtype=np.uint8)
+                title_bar[:] = (50, 50, 50)  # Dark gray background
+                
+                # Add title text
+                title = f"Option {analysis['index']} - Conf: {analysis['confidence']}%"
+                if analysis.get('target_found', False):
+                    title += " [TARGET ✓]"
+                
+                cv2.putText(
+                    title_bar,
+                    title,
+                    (10, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2
+                )
+                
+                # Add spatial description
+                spatial_desc = analysis.get('spatial_desc', '')
+                if spatial_desc:
+                    cv2.putText(
+                        title_bar,
+                        spatial_desc[:40],  # Truncate if too long
+                        (10, 45),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (200, 200, 200),
+                        1
+                    )
+                
+                # Combine title bar and image
+                combined = np.vstack([title_bar, img])
+                images.append(combined)
+                max_height = max(max_height, combined.shape[0])
+                
+            except Exception as e:
+                print(f"Error processing image for analysis {analysis['index']}: {e}")
+        
+        if not images:
+            return None
+        
+        # Normalize heights
+        for i in range(len(images)):
+            h, w = images[i].shape[:2]
+            if h < max_height:
+                padding = np.zeros((max_height - h, w, 3), dtype=np.uint8)
+                images[i] = np.vstack([images[i], padding])
+        
+        # Horizontal concatenation
+        comparison = np.hstack(images)
+        
+        # Save comparison image
+        comparison_path = f"{self.result_dir}/candidate_comparison_{self.step_count}.png"
+        cv2.imwrite(comparison_path, comparison)
+        
+        print(f"Candidate comparison saved: {comparison_path}")
+        return comparison_path
+    
+    def extract_target_detection(self, vlm_response):
+        """(9.4) Extract whether target objects were found from VLM response"""
+        response_lower = vlm_response.lower()
+        
+        # Check for old format first
+        if 'target objects found: yes' in response_lower:
+            return True
+        
+        # For new format, check confidence level
+        # High confidence (>70) suggests task relevance
+        confidence = 25
+        if "confidence:" in response_lower:
+            try:
+                confidence_line = response_lower.split("confidence:")[-1].strip()
+                confidence_str = confidence_line.split()[0].rstrip('%')
+                confidence = int(confidence_str)
+            except:
+                pass
+        elif "confidence score:" in response_lower:  # Fallback
+            try:
+                confidence_line = response_lower.split("confidence score:")[-1].strip()
+                confidence_str = confidence_line.split()[0].rstrip('%')
+                confidence = int(confidence_str)
+            except:
+                pass
+        
+        # Consider high confidence as target found
+        return confidence > 70
+    
+    def extract_visible_objects(self, vlm_response):
+        """(9.4) Extract reasoning from VLM response"""
+        try:
+            # Try new format first
+            if 'Reasoning:' in vlm_response:
+                reasoning_line = vlm_response.split('Reasoning:')[1].split('Confidence:')[0]
+                return reasoning_line.strip()
+            # Fallback to old format
+            elif 'Visible objects:' in vlm_response:
+                visible_line = vlm_response.split('Visible objects:')[1].split('\n')[0]
+                return visible_line.strip()
+        except:
+            pass
+        return "analysis pending"
+    
+    def analyze_candidates_with_vlm_improved(self, candidates):
+        """(9.4) Enhanced VLM analysis with dynamic prompts and visualization"""
+        analyses = []
+        
+        # First generate images with bounding boxes for all candidates
+        candidate_images = self.generate_candidate_images_with_boxes(candidates)
+        
+        for i, img_info in enumerate(candidate_images):
+            obj = img_info['object']
+            obj_type = obj['objectType']
+            
+            print(f"Analyzing {obj_type}_{i+1} with task context...")
+            
+            # Generate dynamic prompt based on current task
+            prompt = self.generate_vlm_prompt(obj_type, i+1)
+            
+            # Call VLM with the generated prompt using new architecture
+            vlm_response = self.vlm_call_with_logging(
+                img_info['image_path'], 
+                prompt, 
+                analysis_type=f"enhanced_analysis_{obj_type}_{i+1}"
+            )
+            
+            # Extract confidence from new simplified format
+            confidence = 25  # Default
+            if "Confidence:" in vlm_response:
+                try:
+                    confidence_line = vlm_response.split("Confidence:")[-1].strip()
+                    confidence_str = confidence_line.split()[0].rstrip('%')
+                    confidence = int(confidence_str)
+                except:
+                    pass
+            elif "Confidence score:" in vlm_response:  # Fallback for old format
+                try:
+                    confidence_line = vlm_response.split("Confidence score:")[-1].strip()
+                    confidence_str = confidence_line.split()[0].rstrip('%')
+                    confidence = int(confidence_str)
+                except:
+                    pass
+            
+            target_found = self.extract_target_detection(vlm_response)
+            
+            # Create VLM dialogue visualization for debugging
+            viz_path = self.create_vlm_dialogue_visualization(
+                obj_type, i+1, prompt, img_info['image_path'], 
+                vlm_response, confidence
+            )
+            
+            analyses.append({
+                'object': obj,
+                'index': i+1,
+                'analysis': vlm_response,
+                'confidence': confidence,
+                'target_found': target_found,
+                'image_path': img_info['image_path'],
+                'vlm_viz_path': viz_path,
+                'has_box': img_info['has_box'],
+                'spatial_desc': self.generate_spatial_description(obj, i, candidates)
+            })
+            
+            print(f"  Confidence: {confidence}%")
+            print(f"  Target found: {'YES' if target_found else 'NO'}")
+            if viz_path:
+                print(f"  VLM dialogue record: {viz_path}")
+        
+        return sorted(analyses, key=lambda x: x['confidence'], reverse=True)
+    
+    def generate_visual_disambiguation_message(self, candidates, analyses):
+        """(9.4) Generate enhanced disambiguation message with image references"""
+        obj_type = candidates[0]['objectType']
+        best = analyses[0]
+        
+        # Create comparison image
+        comparison_path = self.create_candidate_comparison_image(analyses)
+        
+        message = f"""
+{'='*80}
+🤖 MULTI-OBJECT DISAMBIGUATION - ENHANCED INTERFACE
+{'='*80}
+
+Current Task: {getattr(self, 'current_task', 'Navigation task')}
+Target Objects: {', '.join(getattr(self, 'task_context', {}).get('target_objects', ['task items']))}
+Current Step: Navigate to {obj_type}
+
+I found {len(candidates)} {obj_type} objects in the room.
+
+{'='*80}
+DETAILED ANALYSIS
+{'='*80}"""
+        
+        for analysis in analyses:
+            target_status = "✅ TARGET DETECTED" if analysis['target_found'] else "❌ No target found"
+            
+            message += f"""
+
+Option {analysis['index']}: {obj_type}_{analysis['index']}
+  Location: {analysis['spatial_desc']}
+  Reasoning: {self.extract_visible_objects(analysis['analysis'])}
+  Status: {target_status}
+  VLM Confidence: {analysis['confidence']}%
+  Image: {analysis['image_path']}
+  VLM Record: {analysis.get('vlm_viz_path', 'N/A')}
+{'─'*60}"""
+        
+        # Recommendation logic
+        target_candidates = [a for a in analyses if a['target_found']]
+        if target_candidates:
+            recommended = target_candidates[0]
+            reason = f"Target object detected with {recommended['confidence']}% confidence"
+        else:
+            recommended = best
+            reason = f"Highest task relevance confidence ({recommended['confidence']}%)"
+        
+        message += f"""
+
+{'='*33}RECOMMENDATION{'='*33}
+I recommend Option {recommended['index']} ({obj_type}_{recommended['index']})
+Reason: {reason}
+
+YOUR CHOICE OPTIONS
+{'='*80}
+Please enter:
+  • Number (1-{len(candidates)}) to select specific {obj_type}
+  • 'auto' to use my intelligent recommendation  
+  • 'show' to display the comparison image again
+  • 'vlm X' to review VLM analysis for option X
+
+You have {self.user_response_timeout} seconds to respond.
+{'='*80}
+"""
+        
+        return message, comparison_path
+    
+    def create_web_selection_interface(self, analyses, comparison_path):
+        """(9.4) Create web interface for visual candidate selection"""
+        try:
+            import threading
+            import webbrowser
+            from http.server import HTTPServer, SimpleHTTPRequestHandler
+            import os
+            import json
+            import urllib.parse
+            import time
+            
+            class CandidateHTTPHandler(SimpleHTTPRequestHandler):
+                def __init__(self, *args, analyses=None, comparison_path=None, result_container=None, current_task=None, **kwargs):
+                    self.analyses = analyses
+                    self.comparison_path = comparison_path  
+                    self.result_container = result_container
+                    self.current_task = current_task or "Navigation task"
+                    super().__init__(*args, **kwargs)
+                
+                def do_GET(self):
+                    if self.path == '/':
+                        self.serve_selection_page()
+                    elif self.path.startswith('/select/'):
+                        choice = int(self.path.split('/')[-1])
+                        self.result_container['selection'] = choice
+                        self.serve_result_page(choice)
+                    elif self.path.startswith('/image/'):
+                        # Serve images
+                        image_path = urllib.parse.unquote(self.path[7:])  # Remove '/image/'
+                        self.serve_image(image_path)
+                    else:
+                        self.send_error(404)
+                
+                def serve_selection_page(self):
+                    html = self.generate_selection_html()
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(html.encode('utf-8'))
+                
+                def serve_result_page(self, choice):
+                    html = f"""
+                    <html><head><title>Selection Made</title></head>
+                    <body style="font-family: Arial; text-align: center; padding: 50px;">
+                    <h2>✅ Selection Confirmed</h2>
+                    <p>You selected <strong>Option {choice}</strong></p>
+                    <p>You can close this browser window now.</p>
+                    <script>setTimeout(() => window.close(), 3000);</script>
+                    </body></html>
+                    """
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(html.encode('utf-8'))
+                
+                def serve_image(self, image_path):
+                    try:
+                        if os.path.exists(image_path):
+                            with open(image_path, 'rb') as f:
+                                content = f.read()
+                            self.send_response(200)
+                            self.send_header('Content-type', 'image/png')
+                            self.end_headers()
+                            self.wfile.write(content)
+                        else:
+                            self.send_error(404)
+                    except:
+                        self.send_error(500)
+                
+                def generate_selection_html(self):
+                    task_name = self.current_task
+                    
+                    # Generate candidate cards
+                    cards_html = ""
+                    for i, analysis in enumerate(self.analyses, 1):
+                        confidence = analysis.get('confidence', 0)
+                        reasoning = analysis.get('reasoning', 'No reasoning provided')
+                        image_path = analysis.get('image_path', '')
+                        
+                        # Color based on confidence
+                        if confidence >= 70:
+                            color = "#4CAF50"  # Green
+                        elif confidence >= 60:
+                            color = "#FF9800"  # Orange  
+                        else:
+                            color = "#E91E63"  # Pink
+                        
+                        cards_html += f"""
+                        <div style="border: 2px solid {color}; margin: 20px; padding: 15px; border-radius: 10px; display: inline-block; width: 300px; vertical-align: top;">
+                            <h3>Option {i} - Confidence: {confidence}%</h3>
+                            <img src="/image/{urllib.parse.quote(image_path)}" style="width: 280px; height: auto; border: 1px solid #ccc;">
+                            <p style="font-size: 14px; margin: 10px 0;"><strong>Reasoning:</strong> {reasoning}</p>
+                            <button onclick="selectOption({i})" style="background: {color}; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px;">
+                                Select Option {i}
+                            </button>
+                        </div>
+                        """
+                    
+                    # Show comparison image if available
+                    comparison_html = ""
+                    if self.comparison_path and os.path.exists(self.comparison_path):
+                        comparison_html = f"""
+                        <div style="margin: 30px 0;">
+                            <h3>Visual Comparison</h3>
+                            <img src="/image/{urllib.parse.quote(self.comparison_path)}" style="max-width: 800px; border: 2px solid #333;">
+                        </div>
+                        """
+                    
+                    return f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Candidate Selection</title>
+                        <meta charset="utf-8">
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+                            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }}
+                            .header {{ text-align: center; margin-bottom: 30px; }}
+                            .task-info {{ background: #e3f2fd; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="header">
+                                <h1>🤖 Multi-Object Disambiguation</h1>
+                            </div>
+                            
+                            <div class="task-info">
+                                <h3>Current Task: {task_name}</h3>
+                            </div>
+                            
+                            {comparison_html}
+                            
+                            <div style="text-align: center;">
+                                <h2>Please select the best candidate:</h2>
+                                {cards_html}
+                            </div>
+                        </div>
+                        
+                        <script>
+                            function selectOption(choice) {{
+                                fetch('/select/' + choice)
+                                    .then(() => {{
+                                        document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial;"><h2>✅ Selection Confirmed</h2><p>Option ' + choice + ' selected</p></div>';
+                                    }});
+                            }}
+                        </script>
+                    </body>
+                    </html>
+                    """
+                
+                def log_message(self, format, *args):
+                    # Suppress server logs
+                    pass
+            
+            # Setup web server
+            result_container = {'selection': None}
+            port = 8765
+            
+            def create_handler(*args, **kwargs):
+                return CandidateHTTPHandler(*args, analyses=analyses, comparison_path=comparison_path, result_container=result_container, current_task=getattr(self, 'current_task', 'Navigation task'), **kwargs)
+            
+            server = HTTPServer(('localhost', port), create_handler)
+            
+            # Start server in background thread
+            server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+            server_thread.start()
+            
+            # Open browser
+            url = f"http://localhost:{port}"
+            print(f"Web interface available at: {url}")
+            
+            try:
+                webbrowser.open(url)
+                print("Browser should open automatically...")
+            except:
+                print("[ERROR] Could not auto-open browser, please visit the URL manually")
+            
+            # Wait for selection with timeout
+            timeout = getattr(self, 'user_response_timeout', 60)
+            start_time = time.time()
+            
+            while result_container['selection'] is None:
+                time.sleep(0.5)
+                if time.time() - start_time > timeout:
+                    print(f"Timeout reached ({timeout}s). Using intelligent recommendation.")
+                    # Use highest confidence as fallback
+                    best_idx = max(range(len(analyses)), key=lambda i: analyses[i].get('confidence', 0))
+                    result_container['selection'] = best_idx + 1
+                    break
+            
+            server.shutdown()
+            
+            return result_container['selection']
+            
+        except Exception as e:
+            print(f"❌ Web interface failed: {e}")
+            return None
+
+    def create_gui_selection_window(self, analyses, comparison_path):
+        """(9.4) Create GUI window for visual candidate selection"""
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+            from PIL import Image, ImageTk
+            import os
+            
+            class CandidateSelector:
+                def __init__(self, analyses, comparison_path, timeout, current_task):
+                    self.selection = None
+                    self.analyses = analyses
+                    self.timeout = timeout
+                    self.current_task = current_task
+                    
+                    # Create main window
+                    self.root = tk.Tk()
+                    self.root.title("Multi-Object Disambiguation - Select Candidate")
+                    self.root.geometry("1200x800")
+                    self.root.configure(bg='#f0f0f0')
+                    
+                    # Create main frame
+                    main_frame = ttk.Frame(self.root, padding="10")
+                    main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+                    
+                    # Title
+                    title_label = ttk.Label(main_frame, text="🤖 Choose the Best Candidate Object", 
+                                          font=("Arial", 16, "bold"))
+                    title_label.grid(row=0, column=0, columnspan=3, pady=(0, 15))
+                    
+                    # Task info
+                    task_info = f"Task: {self.current_task}"
+                    task_label = ttk.Label(main_frame, text=task_info, font=("Arial", 12))
+                    task_label.grid(row=1, column=0, columnspan=3, pady=(0, 10))
+                    
+                    # Load and display comparison image if available
+                    if comparison_path and os.path.exists(comparison_path):
+                        try:
+                            comparison_img = Image.open(comparison_path)
+                            # Resize if too large
+                            if comparison_img.width > 1000:
+                                ratio = 1000 / comparison_img.width
+                                new_size = (1000, int(comparison_img.height * ratio))
+                                comparison_img = comparison_img.resize(new_size, Image.Resampling.LANCZOS)
+                            
+                            comparison_photo = ImageTk.PhotoImage(comparison_img)
+                            comparison_label = ttk.Label(main_frame, image=comparison_photo)
+                            comparison_label.image = comparison_photo  # Keep reference
+                            comparison_label.grid(row=2, column=0, columnspan=3, pady=(0, 15))
+                        except Exception as e:
+                            print(f"Warning: Could not load comparison image: {e}")
+                    
+                    # Create buttons for each candidate
+                    button_frame = ttk.Frame(main_frame)
+                    button_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0))
+                    
+                    # Sort analyses by confidence for display
+                    sorted_analyses = sorted(analyses, key=lambda x: x['confidence'], reverse=True)
+                    
+                    for i, analysis in enumerate(sorted_analyses):
+                        btn_text = f"Option {analysis['index']}\nConfidence: {analysis['confidence']}%\n{analysis['spatial_desc']}"
+                        
+                        # Color code by confidence
+                        if analysis['confidence'] >= 70:
+                            btn_color = '#90EE90'  # Light green
+                        elif analysis['confidence'] >= 60:
+                            btn_color = '#FFE4B5'  # Light yellow
+                        else:
+                            btn_color = '#FFB6C1'  # Light pink
+                        
+                        btn = tk.Button(button_frame, text=btn_text, width=20, height=4,
+                                      bg=btn_color, font=("Arial", 10),
+                                      command=lambda idx=analysis['index']: self.select_option(idx))
+                        btn.grid(row=0, column=i, padx=10, pady=5)
+                    
+                    # Control buttons
+                    control_frame = ttk.Frame(main_frame)
+                    control_frame.grid(row=4, column=0, columnspan=3, pady=(15, 0))
+                    
+                    auto_btn = tk.Button(control_frame, text="🤖 Use AI Recommendation", 
+                                       bg='#87CEEB', font=("Arial", 11),
+                                       command=lambda: self.select_option('auto'))
+                    auto_btn.grid(row=0, column=0, padx=10)
+                    
+                    # Timeout display
+                    self.timeout_label = ttk.Label(control_frame, text=f"Auto-select in: {timeout}s", 
+                                                 font=("Arial", 10))
+                    self.timeout_label.grid(row=0, column=1, padx=20)
+                    
+                    # Start timeout countdown
+                    self.remaining_time = timeout
+                    self.update_timeout()
+                    
+                    # Center window
+                    self.root.update_idletasks()
+                    x = (self.root.winfo_screenwidth() // 2) - (self.root.winfo_width() // 2)
+                    y = (self.root.winfo_screenheight() // 2) - (self.root.winfo_height() // 2)
+                    self.root.geometry(f"+{x}+{y}")
+                
+                def select_option(self, choice):
+                    self.selection = choice
+                    self.root.quit()
+                    self.root.destroy()
+                
+                def update_timeout(self):
+                    if self.remaining_time > 0 and self.selection is None:
+                        self.timeout_label.config(text=f"Auto-select in: {self.remaining_time}s")
+                        self.remaining_time -= 1
+                        self.root.after(1000, self.update_timeout)
+                    elif self.selection is None:
+                        # Timeout reached
+                        self.select_option('auto')
+                
+                def run(self):
+                    self.root.mainloop()
+                    return self.selection
+            
+            # Create and run selector
+            selector = CandidateSelector(analyses, comparison_path, self.user_response_timeout)
+            selection = selector.run()
+            
+            return selection if selection else 'auto'
+            
+        except ImportError:
+            print("[ERROR] GUI libraries not available, falling back to text interface")
+            return self.get_user_input_with_text_fallback(analyses)
+        except Exception as e:
+            print(f"[ERROR] GUI error: {e}, falling back to text interface")
+            return self.get_user_input_with_text_fallback(analyses)
+    
+    def get_user_input_with_text_fallback(self, analyses):
+        """(9.4) Text fallback for when GUI is not available"""
+        print(f"\n>>> Your choice: ", end='', flush=True)
+        
+        try:
+            import select
+            import sys
+            
+            # Check if input is available within timeout
+            ready, _, _ = select.select([sys.stdin], [], [], self.user_response_timeout)
+            if ready:
+                response = sys.stdin.readline().strip()
+                
+                # Handle special commands
+                if response.lower().startswith('vlm '):
+                    try:
+                        option_num = int(response.split()[1])
+                        for analysis in analyses:
+                            if analysis['index'] == option_num:
+                                vlm_path = analysis.get('vlm_viz_path')
+                                if vlm_path:
+                                    print(f"\nVLM Analysis for Option {option_num}: {vlm_path}")
+                                else:
+                                    print(f"\n[ERROR] No VLM record available for Option {option_num}")
+                                break
+                        return self.get_user_input_with_text_fallback(analyses)  # Ask again
+                    except:
+                        print("\n❓ Invalid VLM command. Use format: 'vlm 1' or 'vlm 2'")
+                        return self.get_user_input_with_text_fallback(analyses)
+                
+                elif response.lower() == 'show':
+                    # Re-display comparison if available
+                    if analyses and 'comparison_path' in dir(self):
+                        print(f"\nComparison image: {self.comparison_path}")
+                    return self.get_user_input_with_text_fallback(analyses)  # Ask again
+                
+                return response
+            else:
+                print(f"\nTimeout reached ({self.user_response_timeout}s). Using intelligent recommendation.")
+                return "auto"
+                
+        except Exception as e:
+            print(f"\n❌ Input error: {e}. Using intelligent recommendation.")
+            return "auto"
+    
+    def get_user_input_with_image_support(self, analyses):
+        """(9.4) Enhanced user input with GUI support"""
+        # Try GUI first, fallback to text if needed
+        comparison_path = getattr(self, 'comparison_path', None)
+        
+        # Prioritize trying Web Dashboard's disambiguation functionality
+        try:
+            from web_dashboard import start_disambiguation_web
+            web_disambiguation_data = {
+                'task_name': getattr(self, 'current_task', 'Navigation task'),
+                'object_type': itemtype if 'itemtype' in locals() else 'Object',
+                'candidates': [
+                    {
+                        'image_path': analysis.get('image_path', ''),
+                        'confidence': analysis.get('confidence', 0),
+                        'reasoning': analysis.get('reasoning', 'No reasoning available')
+                    }
+                    for analysis in analyses
+                ]
+            }
+            
+            web_result = start_disambiguation_web(web_disambiguation_data)
+            if web_result is not None:
+                print(f"[INFO] Web Dashboard selection: Option {web_result}")
+                return web_result
+        except ImportError:
+            # Web dashboard not available, continue using other methods
+            pass
+        except Exception as e:
+            print(f"[ERROR] Web Dashboard disambiguation failed: {e}")
+        
+        # Fallback to GUI if DISPLAY available
+        try:
+            import os
+            if os.environ.get('DISPLAY') or os.name == 'nt':  # Has display or Windows
+                return self.create_gui_selection_window(analyses, comparison_path)
+        except Exception as e:
+            print(f"[ERROR] GUI interface failed: {e}")
+        
+        # Final fallback to text interface
+        print("Using text interface")
+        return self.get_user_input_with_text_fallback(analyses)
+    
+    def request_user_disambiguation_improved(self, itemtype, candidates):
+        """(9.4) Main enhanced disambiguation flow with all new features"""
+        print(f"\nStarting ENHANCED disambiguation for {len(candidates)} {itemtype} objects...")
+        print(f"Task Context: {getattr(self, 'current_task', 'Not set')}")
+        
+        # Use enhanced VLM analysis with dynamic prompts and visualization
+        analyses = self.analyze_candidates_with_vlm_improved(candidates)
+        
+        # Smart auto-selection logic
+        target_found_candidates = [a for a in analyses if a['target_found']]
+        
+        if len(target_found_candidates) == 1:
+            selected = target_found_candidates[0]
+            print(f"Target object clearly found in {itemtype}_{selected['index']}, auto-selecting")
+            return selected['object']
+        elif len(target_found_candidates) > 1:
+            # Multiple targets found, select highest confidence among them
+            best_target = max(target_found_candidates, key=lambda x: x['confidence'])
+            print(f"Multiple targets found, selecting highest confidence: {itemtype}_{best_target['index']}")
+            return best_target['object']
+        
+        # Check confidence gap for auto-selection
+        if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
+            print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
+            return analyses[0]['object']
+        
+        # Generate enhanced visual disambiguation message
+        message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
+        self.comparison_path = comparison_path  # Store for 'show' command
+        
+        # Display message
+        print(message)
+        
+        # Get user response with enhanced input handling
+        response = self.get_user_input_with_image_support(analyses)
+        
+        # Parse response and return selection
+        selected = self.parse_user_response(response, candidates, analyses)
+        return selected
+    
+    # ==================== ENHANCED FEATURES INITIALIZATION ====================
+    
+    def enable_enhanced_features(self, enable_indexing=True, enable_dialogue=True, confidence_threshold=30, timeout=30):
+        """
+        (9.4) Enable enhanced multi-object disambiguation features
+        """
+        print(f"Configuring Enhanced Features (9.4)...")
+        
+        self.enable_object_indexing = enable_indexing
+        self.enable_dialogue_system = enable_dialogue
+        self.confidence_gap_threshold = confidence_threshold
+        self.user_response_timeout = timeout
+        
+        # Initialize object indexing if enabled
+        if enable_indexing:
+            self.init_object_indexing()
+        
+        # Initialize task context storage
+        if not hasattr(self, 'current_task'):
+            self.current_task = None
+        if not hasattr(self, 'current_subtasks'):
+            self.current_subtasks = []
+        if not hasattr(self, 'task_context'):
+            self.task_context = {}
+        if not hasattr(self, 'candidate_images'):
+            self.candidate_images = []
+        
+        print(f"✅ Enhanced Features Configuration:")
+        print(f"   • Object Indexing: {'✅ Enabled' if enable_indexing else '❌ Disabled'}")
+        print(f"   • VLM Dialogue System: {'✅ Enabled' if enable_dialogue else '❌ Disabled'}")
+        print(f"   • Confidence Threshold: {confidence_threshold}%")
+        print(f"   • User Input Timeout: {timeout}s")
+        
+        return self
 
 
 if __name__ == "__main__":

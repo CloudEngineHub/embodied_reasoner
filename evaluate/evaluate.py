@@ -9,6 +9,18 @@ import os
 import time
 from ai2thor.controller import Controller
 from ai2thor.platform import CloudRendering
+
+try:
+    from web_dashboard import start_dashboard_server, log_task_start, log_task_complete, log_interaction
+    WEB_DASHBOARD_AVAILABLE = True
+    print("Web Dashboard is available")
+except ImportError as e:
+    WEB_DASHBOARD_AVAILABLE = False
+    print(f"Web Dashboard is not available: {e}")
+    def start_dashboard_server(*args, **kwargs): return None
+    def log_task_start(data): pass
+    def log_task_complete(success, data=None): pass 
+    def log_interaction(data): pass
 MODE = "API" # choose ["LOCAL","API"]
 PLATFORM_TYPE="GPU" 
 
@@ -66,6 +78,16 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
         
         print(f"******** Task Name: {task_name} *** Max Steps: {max_step} ********")
         print(f"******** Task Record: {save_path} ********")
+        
+        # 记录任务开始 - Web Dashboard
+        log_task_start({
+            'identity': index,
+            'taskquery': task_name,
+            'scene': scene,
+            'tasktype': tasktype,
+            'max_steps': max_step,
+            'save_path': save_path
+        })
         autogn = RocAgent(controller, save_path, scene, visibilityDistance=20, gridSize=0.1, fieldOfView=90, 
                             target_objects=task["target_objects"],
                             related_objects=task["related_objects"],
@@ -73,6 +95,13 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
                             taskid=task["identity"],
                             platform_type=PLATFORM_TYPE)
         print("RoctAgent Initialization successful!!!")
+        
+        # ENHANCEMENT (9.4): Set task context for improved VLM prompts
+        autogn.set_task_context(
+            task_description=task_name,
+            task_type=tasktype
+        )
+        
         objects = autogn.eventobject.get_objects_type(autogn.controller.last_event)
         action, pre_action = "init", "init"
         item, pre_item = None, None
@@ -102,7 +131,7 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
                     }
                     trajectory.append(dic)
                     # Don't stop the controller here as it's shared between tasks
-                    # autogn.controller.stop()  # Commented out to fix multi-task testing
+                    # autogn.controller.stop()
                     result_dir = autogn.result_dir
                     del autogn
                     return trajectory, messages, result_dir
@@ -247,7 +276,7 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
         }
         trajectory.append(dic)
         # Don't stop the controller here as it's shared between tasks
-        # autogn.controller.stop()  # Commented out to fix multi-task testing
+        # autogn.controller.stop()
         del autogn
         return trajectory, messages, save_path
     except Exception as e:
@@ -288,6 +317,11 @@ def test(controller, test_data, model="Qwen2.5-VL-3B-Instruct", port=-1):
     metric_dic = metric(test_data, trajectory, key_actions)
     test_end_time = time.time()
     elapsed_time = int(test_end_time - test_start_time)
+    
+    # Extract success status from calculated metrics
+    task_success = metric_dic["success"] == 1
+    completeness = metric_dic["completeness"]
+    
     with open(f"{result_dir}/result.json","w") as f:
         f.write(json.dumps({
             "identity":test_data["identity"],
@@ -303,7 +337,12 @@ def test(controller, test_data, model="Qwen2.5-VL-3B-Instruct", port=-1):
             "time": elapsed_time,
             "maxstep": get_max_steps(test_data["tasktype"]),
         }, indent=4))
-    print(f"""--task{test_data["identity"]}evaluate successed---""")
+    
+    # Use actual metrics instead of always printing success
+    if task_success:
+        print(f"""--task{test_data["identity"]}evaluate SUCCEEDED--- (completeness: {completeness:.2f})""")
+    else:
+        print(f"""--task{test_data["identity"]}evaluate FAILED--- (completeness: {completeness:.2f})""")
 
 if __name__ == "__main__":
     
@@ -331,22 +370,30 @@ if __name__ == "__main__":
             visibilityDistance=20,
             gridSize=0.1,
             renderDepthImage=False,
-            renderInstanceSegmentation=False,
+            renderInstanceSegmentation=True,
             width=800,
             height=450,
             fieldOfView=90,
         )
         for test_data in tqdm(data):
             try:
-                # 检查任务执行前的result.json是否存在
                 result_file = f"./data/{args.model_name}/{test_data['identity']}_{test_data['tasktype']}_{test_data['scene']}_{test_data['instruction_idx']}/result.json"
                 existed_before = os.path.exists(result_file)
                 
                 test(controller, test_data, args.model_name, args.port)
                 
-                # 只有新生成了result.json才算成功
+                # Check if task actually succeeded by reading the metrics from result.json
                 if os.path.exists(result_file) and not existed_before:
-                    success_count += 1
+                    try:
+                        with open(result_file, 'r') as f:
+                            result_data = json.load(f)
+                            # Use actual success metric instead of just file existence
+                            if result_data.get('metrics', {}).get('success', 0) == 1:
+                                success_count += 1
+                    except (json.JSONDecodeError, KeyError):
+                        # If we can't read metrics, fall back to file existence (backward compatibility)
+                        print(f"Warning: Could not read metrics from {result_file}, using file existence as success indicator")
+                        success_count += 1
             except Exception as e:
                 print(e)
                 print(f"--task{test_data['identity']}failed, End the current evaluation task!!!--")
@@ -357,7 +404,7 @@ if __name__ == "__main__":
     
     
     elif MODE=="API":
-        match_item_model="gpt-4o-mini"  # Use the same model for consistency
+        match_item_model="gpt-4o-mini"
         
         parser = argparse.ArgumentParser()
         parser.add_argument("--input_path", type=str, default="./data/test_809.json", help="input file path")
@@ -367,8 +414,21 @@ if __name__ == "__main__":
         parser.add_argument("--cur_count", type=int, default=1, help="")
         parser.add_argument("--total_count", type=int, default=4, help="")
         parser.add_argument("--task_ids", type=str, default=None, help="Comma-separated task array indices to run (e.g., '0,1,2' for first 3 tasks)")
+        parser.add_argument("--dashboard_port", type=int, default=8888, help="Web dashboard port")
+        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard")
         args = parser.parse_args()
         print(args)
+        
+        # 启动 Web 仪表板
+        dashboard_thread = None
+        if not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
+            print(f"\nLaunching Web dashboard...")
+            dashboard_thread = start_dashboard_server(port=args.dashboard_port, auto_open=True)
+            if dashboard_thread:
+                print(f"Web dashboard: http://localhost:{args.dashboard_port}")
+            else:
+                print("Web dashboard failed.")
+        
         data = load_data(args)
         success_count = 0
         
@@ -382,7 +442,7 @@ if __name__ == "__main__":
             visibilityDistance=20,
             gridSize=0.1,
             renderDepthImage=False,
-            renderInstanceSegmentation=False,
+            renderInstanceSegmentation=True,
             width=800,
             height=450,
             fieldOfView=90,
@@ -390,15 +450,23 @@ if __name__ == "__main__":
         
         for test_data in tqdm(data):
             try:
-                # 检查任务执行前的result.json是否存在
                 result_file = f"./data/{args.model_name}/{test_data['identity']}_{test_data['tasktype']}_{test_data['scene']}_{test_data['instruction_idx']}/result.json"
                 existed_before = os.path.exists(result_file)
                 
                 test(controller, test_data, args.model_name, args.port)
                 
-                # 只有新生成了result.json才算成功
+                # Check if task actually succeeded by reading the metrics from result.json
                 if os.path.exists(result_file) and not existed_before:
-                    success_count += 1
+                    try:
+                        with open(result_file, 'r') as f:
+                            result_data = json.load(f)
+                            # Use actual success metric instead of just file existence
+                            if result_data.get('metrics', {}).get('success', 0) == 1:
+                                success_count += 1
+                    except (json.JSONDecodeError, KeyError):
+                        # If we can't read metrics, fall back to file existence (backward compatibility)
+                        print(f"Warning: Could not read metrics from {result_file}, using file existence as success indicator")
+                        success_count += 1
             except Exception as e:
                 print(e)
                 print(f"--task{test_data['identity']}failed, End the current evaluation task!!!--")
