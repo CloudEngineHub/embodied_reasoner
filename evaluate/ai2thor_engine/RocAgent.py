@@ -34,7 +34,7 @@ class RocAgent(BaseAgent):
             if evaluate_dir not in sys.path:
                 sys.path.append(evaluate_dir)
             
-            from web_dashboard import log_interaction, log_vlm_call
+            from web_ui import log_interaction, log_vlm_call
             self._log_interaction = log_interaction
             self._log_vlm_call = log_vlm_call
             self._web_logging_enabled = True
@@ -106,6 +106,7 @@ class RocAgent(BaseAgent):
         self.confidence_gap_threshold = 30      # Auto-select if confidence gap > 30%
         self.user_response_timeout = 30         # Seconds to wait for user response
         self.current_task_description = ""      # Set by task context
+        self.current_gpt4o_reasoning = ""       # Store GPT-4o reasoning for VLM prompts
         
         # Initialize object indexing
         if self.enable_object_indexing:
@@ -242,6 +243,11 @@ class RocAgent(BaseAgent):
         return image_fp, legal_navigations, legal_interactions
 
     def navigate(self, itemtype):
+        # Store GPT-4o reasoning from previous response if available
+        if hasattr(self, '_last_vlm_response'):
+            reasoning = self.extract_reasoning_from_response(self._last_vlm_response)
+            self.set_gpt4o_reasoning(reasoning)
+        
         # Record navigation action start
         if self._web_logging_enabled:
             self._log_interaction({
@@ -290,10 +296,16 @@ class RocAgent(BaseAgent):
                         item = self.request_user_disambiguation_improved(itemtype, unique_objects)
                         # Robust fallback if disambiguation fails
                         if item is None:
-                            print(f"[ERROR] Disambiguation failed for {itemtype}, using first object")
+                            print(f"[WARNING] Disambiguation returned None for {itemtype}, using first object")
                             item = unique_objects[0]
+                    except KeyError as e:
+                        print(f"[ERROR] Missing key in disambiguation for {itemtype}: {e}")
+                        print(f"  This is likely due to missing 'target_found' or 'image_path' in analysis")
+                        item = unique_objects[0]
                     except Exception as e:
-                        print(f"[ERROR] Disambiguation error for {itemtype}: {e}")
+                        print(f"[ERROR] Unexpected disambiguation error for {itemtype}: {type(e).__name__}: {e}")
+                        import traceback
+                        traceback.print_exc()  # Print full traceback for debugging
                         item = unique_objects[0]
                 elif len(unique_objects) == 1:
                     item = unique_objects[0]
@@ -324,9 +336,9 @@ class RocAgent(BaseAgent):
             print(f"CRITICAL: item is undefined for {itemtype}, attempting emergency fallback")
             if itemtype in self.objecttype2object and self.objecttype2object[itemtype]:
                 item = self.objecttype2object[itemtype][0]
-                print(f"✅ Emergency fallback successful: using {item['objectType']}")
+                print(f"[SUCCESS] Emergency fallback successful: using {item['objectType']}")
             else:
-                print(f"❌ Emergency fallback failed: no objects available")
+                print(f"[ERROR] Emergency fallback failed: no objects available")
                 return None, None, None
         
         # Store itemtype - items not directly navigated to
@@ -1288,7 +1300,7 @@ class RocAgent(BaseAgent):
             }
         ]
         
-        # Three retry mechanism
+        # Three retry mechanism with smart error handling
         for attempt in range(3):
             try:
                 if attempt > 0:
@@ -1296,8 +1308,15 @@ class RocAgent(BaseAgent):
                     time.sleep(2)
                 return vlm.vlm_request(messages)
             except Exception as e:
+                # Check if it's a 400 error (client error) - don't retry
+                error_str = str(e)
+                if "400" in error_str or "invalid_parameter" in error_str.lower():
+                    print(f"VLM analysis failed with client error (400) - not retrying: {e}")
+                    raise e
+                    
+                # For other errors, retry up to 3 times
                 if attempt == 2:
-                    print(f"VLM anaylsis failed - {e}")
+                    print(f"VLM anaylsis failed after 3 attempts - {e}")
                     raise e
     
     # Maintain backward compatible old interface
@@ -1305,54 +1324,240 @@ class RocAgent(BaseAgent):
         """Legacy VLM call interface - redirects to new architecture"""
         return self.vlm_call_with_logging(image_path, prompt, "legacy_call")
     
+    def set_gpt4o_reasoning(self, reasoning_text):
+        """Store GPT-4o's reasoning for use in disambiguation"""
+        self.current_gpt4o_reasoning = reasoning_text
+        print(f"[GPT-4O REASONING] {reasoning_text}")
+
+    def extract_reasoning_from_response(self, response):
+        """Extract reasoning text before <DecisionMaking> tag"""
+        if '<DecisionMaking>' in response:
+            reasoning = response.split('<DecisionMaking>')[0].strip()
+            return reasoning
+        return response.strip()
+    
+    def navigate_to_object_for_analysis(self, obj):
+        """Navigate to specific object for VLM analysis"""
+        view_position = self.calculate_analysis_position(obj)
+        
+        if view_position is None:
+            print(f"  -> No reachable position found for {obj['objectType']}")
+            return False
+        
+        event = self.action.action_mapping["teleport"](
+            self.controller,
+            position=view_position['position'],
+            rotation=view_position['rotation'],
+            horizon=view_position.get('horizon', 0)
+        )
+        
+        return event.metadata['lastActionSuccess']
+
+    def return_to_position(self, original_position):
+        """Return agent to original position after VLM analysis"""
+        event = self.action.action_mapping["teleport"](
+            self.controller,
+            position=original_position['position'],
+            rotation=original_position['rotation'],
+            horizon=original_position['horizon']
+        )
+        
+        if event.metadata['lastActionSuccess']:
+            print("[POSITION] Successfully returned to original position")
+        else:
+            print("[WARNING] Failed to return to original position")
+
+    def calculate_analysis_position(self, obj):
+        """Calculate optimal viewing position for object analysis"""
+        obj_pos = obj['position']
+        
+        # Get all reachable positions
+        event = self.controller.step(dict(action='GetReachablePositions'))
+        reachable_positions = event.metadata['actionReturn']
+        
+        # Find closest reachable position to the object
+        min_distance = float('inf')
+        best_position = None
+        
+        for pos in reachable_positions:
+            distance = math.sqrt(
+                (pos['x'] - obj_pos['x'])**2 + 
+                (pos['z'] - obj_pos['z'])**2
+            )
+            if distance < min_distance:
+                min_distance = distance
+                best_position = pos
+        
+        if best_position is None:
+            return None
+            
+        # Calculate rotation to face the object
+        dx = obj_pos['x'] - best_position['x']
+        dz = obj_pos['z'] - best_position['z']
+        angle = math.degrees(math.atan2(dx, dz))
+        
+        analysis_pos = {
+            'position': best_position,
+            'rotation': {'x': 0, 'y': angle, 'z': 0},
+            'horizon': 0
+        }
+        
+        return analysis_pos
+    
+    def extract_target_detection(self, vlm_response):
+        """Extract whether target object was found from VLM response"""
+        response_lower = vlm_response.lower()
+        positive_indicators = ['found', 'detected', 'visible', 'see', 'present', 'available']
+        return any(indicator in response_lower for indicator in positive_indicators)
+    
     def analyze_candidates_with_vlm(self, task_description, candidates):
+        """Navigate to ALL candidates for individual analysis"""
         analyses = []
         
+        # Store original position to return to
+        original_position = {
+            'position': self.controller.last_event.metadata['agent']['position'],
+            'rotation': self.controller.last_event.metadata['agent']['rotation'],
+            'horizon': self.controller.last_event.metadata['agent']['cameraHorizon']
+        }
+        
+        print(f"[VLM ANALYSIS] Analyzing {len(candidates)} candidates individually")
+        successful_navigations = 0
+        
         for i, obj in enumerate(candidates):
-            print(f"[VLM] Analyzing candidate {i+1}: {obj['objectType']}_{i+1}")
+            print(f"[VLM ANALYSIS] Processing candidate {i+1}/{len(candidates)}: {obj['objectType']}_{i+1}")
             
-            # Navigate to observe this candidate
-            success = self.navigate_to_observe_candidate(obj)
-            if not success:
-                continue
+            # Navigate to this specific object
+            nav_success = self.navigate_to_object_for_analysis(obj)
+            
+            if nav_success:
+                successful_navigations += 1
                 
-            # Save observation image
-            image_path = self.save_frame({
-                "analyzing": f"{obj['objectType']}_{i+1}",
-                "task": task_description
-            })
-            
-            # Get VLM analysis with detailed logging
-            vlm_response = self.vlm_call_with_logging(
-                image_path, 
-                task_description, 
-                analysis_type="candidate_analysis_legacy"
-            )
-            
-            # Extract confidence score
-            confidence = 25  # Default
-            if "Confidence for task:" in vlm_response:
+                # Take photo from this position
+                image_path = self.save_frame({
+                    "analyzing": f"{obj['objectType']}_{i+1}",
+                    "task": task_description,
+                    "candidate": i+1,
+                    "total_candidates": len(candidates)
+                })
+                
+                # Enhanced VLM prompt with GPT-4o context
+                gpt4o_reasoning = getattr(self, 'current_gpt4o_reasoning', 'Agent decided to navigate to this object type.')
+                
+                prompt = f"""TASK: {task_description}
+AGENT'S REASONING: {gpt4o_reasoning}
+
+CURRENT ANALYSIS: {obj['objectType']} #{i+1}
+Position: x={obj['position']['x']:.1f}, z={obj['position']['z']:.1f}
+Spatial Description: {self.generate_spatial_description(obj, i, candidates)}
+
+Analyze this {obj['objectType']} for the given task:
+1. What objects/items are visible on or near this {obj['objectType']}?
+2. Based on the task and agent's reasoning, how suitable is this {obj['objectType']}?
+3. Provide a confidence score (0-100) for task completion relevance.
+
+Response Format:
+Visible Objects: [list what you see]
+Task Suitability: [explain relevance to task]
+Confidence: [0-100]"""
+                
+                # Handle VLM call with error recovery
                 try:
-                    confidence_line = vlm_response.split("Confidence for task:")[-1].strip()
-                    confidence_str = confidence_line.split()[0]
-                    # Remove % symbol if present
-                    confidence_str = confidence_str.rstrip('%')
-                    confidence = int(confidence_str)
-                except:
-                    pass
+                    vlm_response = self.vlm_call_with_logging(image_path, prompt)
+                    confidence = self.extract_confidence_from_response(vlm_response)
+                    analysis_quality = "individual_navigation"
+                except Exception as e:
+                    print(f"  -> VLM call failed for {obj['objectType']}_{i+1}: {e}")
+                    print(f"  -> Continuing with next object...")
+                    vlm_response = f"VLM analysis failed: {str(e)}. Object was successfully reached for navigation."
+                    confidence = 5  # Very low confidence for VLM failure
+                    analysis_quality = "navigation_success_vlm_failed"
+                
+            else:
+                # Navigation failed - use spatial reasoning
+                print(f"  -> Navigation failed for {obj['objectType']}_{i+1}")
+                confidence = 1  # Very low confidence for navigation failure
+                vlm_response = f"Navigation to {obj['objectType']}_{i+1} failed. Using spatial estimation."
+                analysis_quality = "navigation_failed"
+                image_path = ""
             
             analyses.append({
                 'object': obj,
-                'index': i+1,
-                'analysis': vlm_response,
+                'index': i + 1,
                 'confidence': confidence,
-                'spatial_desc': self.generate_spatial_description(obj, i, candidates)
+                'analysis': vlm_response,
+                'analysis_quality': analysis_quality,
+                'spatial_desc': self.generate_spatial_description(obj, i, candidates),
+                'target_found': self.extract_target_detection(vlm_response) if nav_success else False,
+                'image_path': image_path
             })
-            
-            print(f"  Confidence: {confidence}%")
         
-        # Sort by confidence (highest first)
+        # Return to original position
+        print(f"[VLM ANALYSIS] Returning to original position after analyzing {len(candidates)} candidates")
+        self.return_to_position(original_position)
+        
+        print(f"[VLM ANALYSIS] Analysis complete: {successful_navigations}/{len(candidates)} successful navigations")
+        
+        # Fallback check: if all navigations failed
+        if successful_navigations == 0:
+            print("[FALLBACK] All VLM navigations failed - will use xxx[0] fallback")
+            return None  # Signal to use fallback
+        
         return sorted(analyses, key=lambda x: x['confidence'], reverse=True)
+    
+    def get_object_visibility_details(self, obj):
+        """Check if object is visible from current position"""
+        try:
+            current_objects = self.controller.last_event.metadata.get('objects', [])
+            for scene_obj in current_objects:
+                if scene_obj['objectId'] == obj['objectId']:
+                    is_visible = scene_obj.get('visible', False)
+                    distance = scene_obj.get('distance', float('inf'))
+                    return {
+                        'is_visible': is_visible,
+                        'distance': distance,
+                        'reason': 'clearly_visible' if is_visible else 'not_in_view'
+                    }
+            
+            return {'is_visible': False, 'distance': float('inf'), 'reason': 'object_not_found'}
+        except Exception as e:
+            print(f"Error checking visibility for {obj['objectId']}: {e}")
+            return {'is_visible': False, 'distance': float('inf'), 'reason': 'error_checking'}
+
+    def vlm_call_with_object_focus(self, image_path, task_description, target_obj, visibility_info, candidate_index):
+        """VLM analysis focusing on specific object"""
+        obj_type = target_obj['objectType']
+        obj_position = target_obj['position']
+        
+        focused_prompt = f"""TASK: {task_description}
+
+FOCUS OBJECT: {obj_type} (Candidate {candidate_index})
+- Position: x={obj_position['x']:.1f}, z={obj_position['z']:.1f}
+- Distance: {visibility_info['distance']:.1f}m
+
+Analyze this scene for the {obj_type} at the given position. How suitable is this {obj_type} for the task "{task_description}"?
+
+Respond with:
+Reasoning: [your analysis]
+Confidence: [0-100]"""
+        
+        return self.vlm_call_with_logging(
+            image_path, 
+            focused_prompt,
+            analysis_type=f"focused_{obj_type}_analysis"
+        )
+
+    def extract_confidence_from_response(self, vlm_response):
+        """Extract confidence score from VLM response"""
+        confidence = 40  # Default for visible objects
+        if "Confidence:" in vlm_response:
+            try:
+                confidence_part = vlm_response.split("Confidence:")[-1].strip()
+                confidence_str = confidence_part.split()[0].rstrip('%')
+                confidence = int(confidence_str)
+            except:
+                pass
+        return confidence
     
     def navigate_to_observe_candidate(self, obj):
         """Navigate to observe a candidate object"""
@@ -1421,7 +1626,7 @@ Please choose:"""
                 return "auto"
                 
         except Exception as e:
-            print(f"\n❌ Input error: {e}. Using auto-recommendation.")
+            print(f"\n[ERROR] Input error: {e}. Using auto-recommendation.")
             return "auto"
     
     def parse_user_response(self, response, candidates, analyses):
@@ -1853,10 +2058,10 @@ Please choose:"""
         self.enable_dialogue_system = enable_dialogue  
         self.enable_multi_view = enable_multi_view
         
-        print(f"⚙️ Enhanced Navigation Configuration:")
-        print(f"  • Object Indexing: {'✅' if enable_indexing else '❌'}")
-        print(f"  • Dialogue System: {'✅' if enable_dialogue else '❌'}")
-        print(f"  • Multi-view Observation: {'✅' if enable_multi_view else '❌'}")
+        print(f"Enhanced Navigation Configuration:")
+        print(f"  • Object Indexing: {'[ENABLED]' if enable_indexing else '[DISABLED]'}")
+        print(f"  • Dialogue System: {'[ENABLED]' if enable_dialogue else '[DISABLED]'}")
+        print(f"  • Multi-view Observation: {'[ENABLED]' if enable_multi_view else '[DISABLED]'}")
         
         # Reinitialize object index
         if enable_indexing:
@@ -2101,7 +2306,7 @@ Confidence: [0-100]"""
             if hasattr(self.controller.last_event, 'instance_detections2D'):
                 detections = self.controller.last_event.instance_detections2D
                 
-                if obj['objectId'] in detections:
+                if detections is not None and obj['objectId'] in detections:
                     bbox = detections[obj['objectId']]
                     print(f"Found 2D detection for {obj['objectId']}: {bbox}")
                     
@@ -2125,7 +2330,12 @@ Confidence: [0-100]"""
                             'y_max': int(bbox.get('y_max', bbox.get('y', 0) + bbox.get('height', 100)))
                         }
                 else:
-                    print(f"[ERROR] Object {obj['objectId']} not found in instance_detections2D")
+                    if detections is None:
+                        print(f"[ERROR] instance_detections2D is None for {obj['objectId']}")
+                    else:
+                        available_ids = list(detections.keys()) if detections else []
+                        print(f"[ERROR] Object {obj['objectId']} not found in instance_detections2D")
+                        print(f"Available object IDs: {available_ids[:5]}...")  # Show first 5
             else:
                 print("[ERROR] instance_detections2D not available in last_event")
             
@@ -2133,7 +2343,7 @@ Confidence: [0-100]"""
             print("Refreshing detection data...")
             event = self.controller.step(action="Pass")  # No-op action to refresh data
             
-            if hasattr(event, 'instance_detections2D') and obj['objectId'] in event.instance_detections2D:
+            if hasattr(event, 'instance_detections2D') and event.instance_detections2D is not None and obj['objectId'] in event.instance_detections2D:
                 bbox = event.instance_detections2D[obj['objectId']]
                 print(f"✅ Found 2D detection after refresh: {bbox}")
                 if isinstance(bbox, list) and len(bbox) >= 4:
@@ -2337,9 +2547,18 @@ Confidence: [0-100]"""
         
         for analysis in analyses:
             try:
-                img = cv2.imread(analysis['image_path'])
+                # Load image with safety checks
+                img_path = analysis.get('image_path', '')
+                if not img_path:
+                    print(f"Warning: Missing image_path for analysis {analysis.get('index', 'unknown')}")
+                    continue
+                if not os.path.exists(img_path):
+                    print(f"Warning: Image file does not exist: {img_path}")
+                    continue
+                    
+                img = cv2.imread(img_path)
                 if img is None:
-                    print(f"Warning: Could not load {analysis['image_path']}")
+                    print(f"Warning: Could not load image from {img_path}")
                     continue
                 
                 height, width = img.shape[:2]
@@ -2352,7 +2571,7 @@ Confidence: [0-100]"""
                 # Add title text
                 title = f"Option {analysis['index']} - Conf: {analysis['confidence']}%"
                 if analysis.get('target_found', False):
-                    title += " [TARGET ✓]"
+                    title += " [TARGET FOUND]"
                 
                 cv2.putText(
                     title_bar,
@@ -2526,7 +2745,7 @@ Confidence: [0-100]"""
         
         message = f"""
 {'='*80}
-🤖 MULTI-OBJECT DISAMBIGUATION - ENHANCED INTERFACE
+MULTI-OBJECT DISAMBIGUATION - ENHANCED INTERFACE
 {'='*80}
 
 Current Task: {getattr(self, 'current_task', 'Navigation task')}
@@ -2540,7 +2759,7 @@ DETAILED ANALYSIS
 {'='*80}"""
         
         for analysis in analyses:
-            target_status = "✅ TARGET DETECTED" if analysis['target_found'] else "❌ No target found"
+            target_status = "[TARGET DETECTED]" if analysis.get('target_found', False) else "[No target found]"
             
             message += f"""
 
@@ -2554,7 +2773,7 @@ Option {analysis['index']}: {obj_type}_{analysis['index']}
 {'─'*60}"""
         
         # Recommendation logic
-        target_candidates = [a for a in analyses if a['target_found']]
+        target_candidates = [a for a in analyses if a.get('target_found', False)]
         if target_candidates:
             recommended = target_candidates[0]
             reason = f"Target object detected with {recommended['confidence']}% confidence"
@@ -2626,7 +2845,7 @@ You have {self.user_response_timeout} seconds to respond.
                     html = f"""
                     <html><head><title>Selection Made</title></head>
                     <body style="font-family: Arial; text-align: center; padding: 50px;">
-                    <h2>✅ Selection Confirmed</h2>
+                    <h2>Selection Confirmed</h2>
                     <p>You selected <strong>Option {choice}</strong></p>
                     <p>You can close this browser window now.</p>
                     <script>setTimeout(() => window.close(), 3000);</script>
@@ -2706,7 +2925,7 @@ You have {self.user_response_timeout} seconds to respond.
                     <body>
                         <div class="container">
                             <div class="header">
-                                <h1>🤖 Multi-Object Disambiguation</h1>
+                                <h1>Multi-Object Disambiguation</h1>
                             </div>
                             
                             <div class="task-info">
@@ -2725,7 +2944,7 @@ You have {self.user_response_timeout} seconds to respond.
                             function selectOption(choice) {{
                                 fetch('/select/' + choice)
                                     .then(() => {{
-                                        document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial;"><h2>✅ Selection Confirmed</h2><p>Option ' + choice + ' selected</p></div>';
+                                        document.body.innerHTML = '<div style="text-align: center; padding: 50px; font-family: Arial;"><h2>Selection Confirmed</h2><p>Option ' + choice + ' selected</p></div>';
                                     }});
                             }}
                         </script>
@@ -2807,7 +3026,7 @@ You have {self.user_response_timeout} seconds to respond.
                     main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
                     
                     # Title
-                    title_label = ttk.Label(main_frame, text="🤖 Choose the Best Candidate Object", 
+                    title_label = ttk.Label(main_frame, text="Choose the Best Candidate Object", 
                                           font=("Arial", 16, "bold"))
                     title_label.grid(row=0, column=0, columnspan=3, pady=(0, 15))
                     
@@ -2860,7 +3079,7 @@ You have {self.user_response_timeout} seconds to respond.
                     control_frame = ttk.Frame(main_frame)
                     control_frame.grid(row=4, column=0, columnspan=3, pady=(15, 0))
                     
-                    auto_btn = tk.Button(control_frame, text="🤖 Use AI Recommendation", 
+                    auto_btn = tk.Button(control_frame, text="Use AI Recommendation", 
                                        bg='#87CEEB', font=("Arial", 11),
                                        command=lambda: self.select_option('auto'))
                     auto_btn.grid(row=0, column=0, padx=10)
@@ -2953,7 +3172,7 @@ You have {self.user_response_timeout} seconds to respond.
                 return "auto"
                 
         except Exception as e:
-            print(f"\n❌ Input error: {e}. Using intelligent recommendation.")
+            print(f"\n[ERROR] Input error: {e}. Using intelligent recommendation.")
             return "auto"
     
     def get_user_input_with_image_support(self, analyses):
@@ -2963,7 +3182,7 @@ You have {self.user_response_timeout} seconds to respond.
         
         # Prioritize trying Web Dashboard's disambiguation functionality
         try:
-            from web_dashboard import start_disambiguation_web
+            from web_ui import start_disambiguation_web
             web_disambiguation_data = {
                 'task_name': getattr(self, 'current_task', 'Navigation task'),
                 'object_type': itemtype if 'itemtype' in locals() else 'Object',
@@ -3004,25 +3223,21 @@ You have {self.user_response_timeout} seconds to respond.
         print(f"\nStarting ENHANCED disambiguation for {len(candidates)} {itemtype} objects...")
         print(f"Task Context: {getattr(self, 'current_task', 'Not set')}")
         
-        # Use enhanced VLM analysis with dynamic prompts and visualization
-        analyses = self.analyze_candidates_with_vlm_improved(candidates)
+        # Use navigation-based VLM analysis
+        task_description = getattr(self, 'current_task', f'Navigate to {itemtype}')
+        analyses = self.analyze_candidates_with_vlm(task_description, candidates)
         
-        # Smart auto-selection logic
-        target_found_candidates = [a for a in analyses if a['target_found']]
+        # Check if VLM analysis failed completely
+        if analyses is None:
+            print(f"[FALLBACK] VLM analysis failed, using first object: {itemtype}")
+            return candidates[0]
         
-        if len(target_found_candidates) == 1:
-            selected = target_found_candidates[0]
-            print(f"Target object clearly found in {itemtype}_{selected['index']}, auto-selecting")
-            return selected['object']
-        elif len(target_found_candidates) > 1:
-            # Multiple targets found, select highest confidence among them
-            best_target = max(target_found_candidates, key=lambda x: x['confidence'])
-            print(f"Multiple targets found, selecting highest confidence: {itemtype}_{best_target['index']}")
-            return best_target['object']
-        
-        # Check confidence gap for auto-selection
+        # Simplified confidence-based auto-selection
         if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
             print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
+            return analyses[0]['object']
+        elif len(analyses) == 1:
+            print(f"Single candidate found, auto-selecting {itemtype}_{analyses[0]['index']}")
             return analyses[0]['object']
         
         # Generate enhanced visual disambiguation message
@@ -3066,9 +3281,9 @@ You have {self.user_response_timeout} seconds to respond.
         if not hasattr(self, 'candidate_images'):
             self.candidate_images = []
         
-        print(f"✅ Enhanced Features Configuration:")
-        print(f"   • Object Indexing: {'✅ Enabled' if enable_indexing else '❌ Disabled'}")
-        print(f"   • VLM Dialogue System: {'✅ Enabled' if enable_dialogue else '❌ Disabled'}")
+        print(f"Enhanced Features Configuration:")
+        print(f"   • Object Indexing: {'[ENABLED]' if enable_indexing else '[DISABLED]'}")
+        print(f"   • VLM Dialogue System: {'[ENABLED]' if enable_dialogue else '[DISABLED]'}")
         print(f"   • Confidence Threshold: {confidence_threshold}%")
         print(f"   • User Input Timeout: {timeout}s")
         

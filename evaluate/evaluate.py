@@ -11,7 +11,7 @@ from ai2thor.controller import Controller
 from ai2thor.platform import CloudRendering
 
 try:
-    from web_dashboard import start_dashboard_server, log_task_start, log_task_complete, log_interaction
+    from web_ui import start_dashboard_server, log_task_start, log_task_complete, log_interaction
     WEB_DASHBOARD_AVAILABLE = True
     print("Web Dashboard is available")
 except ImportError as e:
@@ -415,21 +415,65 @@ if __name__ == "__main__":
         parser.add_argument("--total_count", type=int, default=4, help="")
         parser.add_argument("--task_ids", type=str, default=None, help="Comma-separated task array indices to run (e.g., '0,1,2' for first 3 tasks)")
         parser.add_argument("--dashboard_port", type=int, default=8888, help="Web dashboard port")
-        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard")
+        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard (only applies to dialogue mode)")
         args = parser.parse_args()
         print(args)
         
-        # 启动 Web 仪表板
+        data = load_data(args)
+        
+        # Launch Web Dashboard - Only for dialogue mode
         dashboard_thread = None
-        if not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
-            print(f"\nLaunching Web dashboard...")
+        
+        # Check if dialogue system is enabled
+        dialogue_enabled = False
+        try:
+            # We need to check the actual RocAgent class default value
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), 'ai2thor_engine'))
+            from ai2thor_engine.RocAgent import RocAgent
+            
+            # Create a temporary instance to check the default setting
+            # We can't instantiate fully without controller, so check class defaults
+            dialogue_enabled = getattr(RocAgent, '_default_enable_dialogue_system', False)
+            
+            # Fallback: create minimal instance to check instance defaults
+            if not dialogue_enabled:
+                try:
+                    # Check what the __init__ sets as default
+                    import inspect
+                    source = inspect.getsource(RocAgent.__init__)
+                    if 'self.enable_dialogue_system = True' in source:
+                        dialogue_enabled = True
+                except:
+                    pass
+        except:
+            dialogue_enabled = False
+        
+        # Only launch dashboard if dialogue system is enabled AND --no_dashboard not specified
+        if dialogue_enabled and not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
+            print(f"\nLaunching Web dashboard for dialogue mode...")
             dashboard_thread = start_dashboard_server(port=args.dashboard_port, auto_open=True)
             if dashboard_thread:
                 print(f"Web dashboard: http://localhost:{args.dashboard_port}")
             else:
                 print("Web dashboard failed.")
+        elif not dialogue_enabled:
+            print("Dialogue system disabled - no dashboard needed")
+        elif args.no_dashboard:
+            print("Dashboard disabled by --no_dashboard flag")
         
-        data = load_data(args)
+        # If no tasks to run, keep dashboard running
+        if len(data) == 0:
+            print("No tasks to run, but keeping dashboard active for monitoring...")
+            if dashboard_thread:
+                try:
+                    import time
+                    time.sleep(5)  # Keep it running for a bit
+                    print(f"Dashboard is running at http://localhost:{args.dashboard_port}")
+                except KeyboardInterrupt:
+                    print("Dashboard stopped by user")
+            exit(0)
         success_count = 0
         
         controller = Controller(

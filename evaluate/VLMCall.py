@@ -151,7 +151,13 @@ class VLMAPI:
                 
                 except Exception as ex:
                     print(f"Attempt call {self.model} {retry_count + 1} failed: {ex}")
-                    time.sleep(300)
+                    # Check if it's a 400 error (client error) - don't retry
+                    error_str = str(ex)
+                    if "400" in error_str or "invalid_parameter" in error_str.lower():
+                        print(f"Client error (400) - not retrying: {ex}")
+                        break
+                    # For other errors, use shorter sleep time
+                    time.sleep(3)  # 3 seconds instead of 300
                     retry_count += 1
             
             
@@ -213,7 +219,13 @@ class VLMAPI:
                     return content
                 except Exception as ex:
                     print(f"Attempt call {self.model} {retry_count + 1} failed: {ex}")
-                    time.sleep(300)
+                    # Check if it's a 400 error (client error) - don't retry
+                    error_str = str(ex)
+                    if "400" in error_str or "invalid_parameter" in error_str.lower():
+                        print(f"Client error (400) - not retrying: {ex}")
+                        break
+                    # For other errors, use shorter sleep time
+                    time.sleep(3)  # 3 seconds instead of 300
                     retry_count += 1
         
         return None
