@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import os
 import json
 import time
@@ -137,12 +136,12 @@ def log_vlm_call(vlm_data: dict):
     monitor.add_vlm_call(vlm_data)
 
 
-def start_disambiguation_web(disambiguation_data: dict) -> Optional[int]:
+def start_disambiguation_web(disambiguation_data: dict, timeout: int = 30) -> Optional[int]:
     """Start web-based disambiguation interface"""
     try:
         monitor.start_disambiguation(disambiguation_data)
        
-        timeout = 30
+        # Use provided timeout or default to 30
         start_time = time.time()
        
         while monitor.user_selection is None:

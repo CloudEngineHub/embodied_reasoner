@@ -108,6 +108,10 @@ class RocAgent(BaseAgent):
         self.current_task_description = ""      # Set by task context
         self.current_gpt4o_reasoning = ""       # Store GPT-4o reasoning for VLM prompts
         
+        # Disambiguation mode configuration
+        self.disambiguation_mode = "human_first"  # Options: "vlm_auto", "human_first"
+        self.human_selection_timeout = 60        # Seconds to wait for human selection
+        
         # Initialize object indexing
         if self.enable_object_indexing:
             self.init_object_indexing()
@@ -1404,6 +1408,149 @@ class RocAgent(BaseAgent):
         
         return analysis_pos
     
+    def take_candidate_photos_only(self, task_description, candidates):
+        """Navigate to ALL candidates and take photos without VLM analysis"""
+        analyses = []
+        
+        # Store original position to return to
+        original_position = {
+            'position': self.controller.last_event.metadata['agent']['position'],
+            'rotation': self.controller.last_event.metadata['agent']['rotation'],
+            'horizon': self.controller.last_event.metadata['agent']['cameraHorizon']
+        }
+        
+        print(f"[PHOTO CAPTURE] Taking photos of {len(candidates)} candidates individually")
+        successful_navigations = 0
+        
+        for i, obj in enumerate(candidates):
+            print(f"[PHOTO CAPTURE] Processing candidate {i+1}/{len(candidates)}: {obj['objectType']}_{i+1}")
+            
+            # Navigate to this specific object
+            nav_success = self.navigate_to_object_for_analysis(obj)
+            
+            if nav_success:
+                successful_navigations += 1
+                
+                # Take photo from this position
+                image_path = self.save_frame({
+                    "analyzing": f"{obj['objectType']}_{i+1}",
+                    "task": task_description,
+                    "candidate": i+1,
+                    "total_candidates": len(candidates)
+                })
+                
+                # No VLM analysis - just store photo info
+                confidence = 50  # Neutral confidence for human selection
+                vlm_response = f"Photo captured for human selection: {obj['objectType']}_{i+1}"
+                analysis_quality = "photo_only"
+                
+            else:
+                # Navigation failed - no photo
+                print(f"  -> Navigation failed for {obj['objectType']}_{i+1}")
+                confidence = 1  # Very low confidence for navigation failure
+                vlm_response = f"Navigation to {obj['objectType']}_{i+1} failed. No photo available."
+                analysis_quality = "navigation_failed"
+                image_path = ""
+            
+            analyses.append({
+                'object': obj,
+                'index': i + 1,
+                'confidence': confidence,
+                'analysis': vlm_response,
+                'analysis_quality': analysis_quality,
+                'spatial_desc': self.generate_spatial_description(obj, i, candidates),
+                'target_found': False,
+                'image_path': image_path
+            })
+        
+        # Return to original position
+        print(f"[PHOTO CAPTURE] Returning to original position after capturing {len(candidates)} photos")
+        self.return_to_position(original_position)
+        
+        print(f"[PHOTO CAPTURE] Photo capture complete: {successful_navigations}/{len(candidates)} successful navigations")
+        
+        # Return all analyses for human selection (don't sort by confidence)
+        return analyses
+    
+    def get_user_selection_with_timeout(self, analyses, comparison_path, timeout):
+        """Get user selection with timeout, fallback to existing UI methods"""
+        # Save the current timeout and use the provided one
+        original_timeout = self.user_response_timeout
+        self.user_response_timeout = timeout
+        
+        try:
+            # Use the existing user input method with image support
+            result = self.get_user_input_with_image_support(analyses)
+            return result
+        finally:
+            # Restore original timeout
+            self.user_response_timeout = original_timeout
+    
+    def get_object_by_choice(self, choice, analyses):
+        """Get object by user choice number"""
+        try:
+            choice_num = int(choice) - 1
+            if 0 <= choice_num < len(analyses):
+                return analyses[choice_num]['object']
+        except:
+            pass
+        return analyses[0]['object']
+    
+    def run_vlm_analysis_on_photos(self, photo_analyses, task_description):
+        """Run VLM analysis on already captured photos"""
+        print("[VLM FALLBACK] Analyzing captured photos with VLM...")
+        vlm_analyses = []
+        
+        for analysis in photo_analyses:
+            if analysis['image_path'] and analysis['analysis_quality'] != 'navigation_failed':
+                obj = analysis['object']
+                i = analysis['index'] - 1
+                
+                # Enhanced VLM prompt with GPT-4o context
+                gpt4o_reasoning = getattr(self, 'current_gpt4o_reasoning', 'Agent decided to navigate to this object type.')
+                
+                prompt = f"""TASK: {task_description}
+AGENT'S REASONING: {gpt4o_reasoning}
+
+CURRENT ANALYSIS: {obj['objectType']} #{analysis['index']}
+Position: x={obj['position']['x']:.1f}, z={obj['position']['z']:.1f}
+Spatial Description: {analysis['spatial_desc']}
+
+Analyze this {obj['objectType']} for the given task:
+1. What objects/items are visible on or near this {obj['objectType']}?
+2. Based on the task and agent's reasoning, how suitable is this {obj['objectType']}?
+3. Provide a confidence score (0-100) for task completion relevance.
+
+Response Format:
+Visible Objects: [list what you see]
+Task Suitability: [explain relevance to task]
+Confidence: [0-100]"""
+                
+                try:
+                    vlm_response = self.vlm_call_with_logging(analysis['image_path'], prompt)
+                    confidence = self.extract_confidence_from_response(vlm_response)
+                    analysis['confidence'] = confidence
+                    analysis['analysis'] = vlm_response
+                    analysis['analysis_quality'] = "vlm_fallback"
+                except Exception as e:
+                    print(f"  -> VLM fallback failed for {obj['objectType']}_{analysis['index']}: {e}")
+                    analysis['confidence'] = 5  # Very low confidence
+                    analysis['analysis_quality'] = "vlm_fallback_failed"
+            
+            vlm_analyses.append(analysis)
+        
+        return sorted(vlm_analyses, key=lambda x: x['confidence'], reverse=True)
+    
+    def select_best_candidate_from_vlm(self, analyses, itemtype):
+        """Select best candidate from VLM analyses"""
+        if not analyses:
+            print(f"[ERROR] No analyses available for {itemtype}")
+            return None
+            
+        best_analysis = analyses[0]
+        print(f"[VLM SELECTED] Best candidate: {itemtype}_{best_analysis['index']} (confidence: {best_analysis['confidence']}%)")
+        return best_analysis['object']
+    
     def extract_target_detection(self, vlm_response):
         """Extract whether target object was found from VLM response"""
         response_lower = vlm_response.lower()
@@ -1783,7 +1930,7 @@ Please choose:"""
             final_positions = [(original_pos, original_rot)]  # First is always original interaction position
             final_positions.extend(supplementary_positions)
             
-            print(f"   ✅ Final multi-view strategy:")
+            print(f"   [DEBUG] Final multi-view strategy:")
             print(f"     • View 1: Original interaction position (interaction optimized)")
             for i, (pos, rot) in enumerate(supplementary_positions, 2):
                 angle = self.calculate_angle(pos, item_pos)
@@ -2000,18 +2147,20 @@ Please choose:"""
                 print(f"\nNavigating to view {i+1}/{len(positions)} ({view_type})...")
                 
                 try:
-                    # Navigate to observation position
+                    # Navigate to observation position (inherit original vision optimization)
                     event = self.action.action_mapping["teleport"](
                         self.controller,
                         position=pos,
                         rotation=rot,
-                        horizon=0
+                        horizon=60
                     )
                     
                     if event.metadata['lastActionSuccess']:
-                        print(f"   ✅ Navigation successful!")
+                        print(f"   [DEBUG] Navigation successful!")
                         
-                        
+                        # Apply original navigation's vision optimization
+                        self.adjust_height(item)
+                        self.adjust_view(item)
                         
                         # Save observation image, distinguish viewpoint type
                         view_type_label = "interaction" if i == 0 else "supplementary"
@@ -2029,10 +2178,10 @@ Please choose:"""
                         successful_views += 1
                         
                     else:
-                        print(f"   ❌ Navigation failed")
+                        print(f"   [Warning] Navigation failed")
                         
                 except Exception as e:
-                    print(f"   ❌ Error during navigation: {e}")
+                    print(f"   [Warning] Error during navigation: {e}")
             
             print(f"\nMulti-view observation complete:")
             print(f"   • Total positions attempted: {len(positions)}")
@@ -2345,7 +2494,7 @@ Confidence: [0-100]"""
             
             if hasattr(event, 'instance_detections2D') and event.instance_detections2D is not None and obj['objectId'] in event.instance_detections2D:
                 bbox = event.instance_detections2D[obj['objectId']]
-                print(f"✅ Found 2D detection after refresh: {bbox}")
+                print(f"[DEBUG] Found 2D detection after refresh: {bbox}")
                 if isinstance(bbox, list) and len(bbox) >= 4:
                     x1, y1, x2, y2 = bbox[:4]
                     return {
@@ -2370,11 +2519,11 @@ Confidence: [0-100]"""
                     'y_max': min(frame_height, center_y + box_height // 2)
                 }
             
-            print(f"❌ No bounding box available for {obj['objectId']}")
+            print(f"No bounding box available for {obj['objectId']}")
             return None
             
         except Exception as e:
-            print(f"❌ Error getting 2D bounding box for {obj.get('objectId', 'unknown')}: {e}")
+            print(f"Error getting 2D bounding box for {obj.get('objectId', 'unknown')}: {e}")
             return None
     
     def project_3d_bbox_to_2d(self, obj):
@@ -2468,7 +2617,7 @@ Confidence: [0-100]"""
             )
             
         except Exception as e:
-            print(f"❌ Error drawing bounding box for {label}: {e}")
+            print(f"Error drawing bounding box for {label}: {e}")
         
         return image_copy
     
@@ -2486,7 +2635,7 @@ Confidence: [0-100]"""
             # Navigate to observe this candidate
             success = self.navigate_to_observe_candidate(obj)
             if not success:
-                print(f"   ❌ Failed to navigate to {obj_type}_{i+1}")
+                print(f"   [Warning] Failed to navigate to {obj_type}_{i+1}")
                 continue
             
             # Get current frame
@@ -2505,7 +2654,7 @@ Confidence: [0-100]"""
                     label=f"{obj_type}_{i+1}",
                     color=color
                 )
-                print(f"   ✅ Bounding box drawn for {obj_type}_{i+1}")
+                print(f"   [DEBUG] Bounding box drawn for {obj_type}_{i+1}")
             else:
                 image_with_box = frame
                 print(f"   [ERROR] No bounding box for {obj_type}_{i+1}, using plain image")
@@ -2997,7 +3146,7 @@ You have {self.user_response_timeout} seconds to respond.
             return result_container['selection']
             
         except Exception as e:
-            print(f"❌ Web interface failed: {e}")
+            print(f"[Warning] Web interface failed: {e}")
             return None
 
     def create_gui_selection_window(self, analyses, comparison_path):
@@ -3190,7 +3339,7 @@ You have {self.user_response_timeout} seconds to respond.
                     {
                         'image_path': analysis.get('image_path', ''),
                         'confidence': analysis.get('confidence', 0),
-                        'reasoning': analysis.get('reasoning', 'No reasoning available')
+                        'reasoning': analysis.get('analysis', analysis.get('spatial_desc', 'No analysis available'))
                     }
                     for analysis in analyses
                 ]
@@ -3219,30 +3368,67 @@ You have {self.user_response_timeout} seconds to respond.
         return self.get_user_input_with_text_fallback(analyses)
     
     def request_user_disambiguation_improved(self, itemtype, candidates):
-        """(9.4) Main enhanced disambiguation flow with all new features"""
+        """Main enhanced disambiguation flow with configurable modes"""
         print(f"\nStarting ENHANCED disambiguation for {len(candidates)} {itemtype} objects...")
         print(f"Task Context: {getattr(self, 'current_task', 'Not set')}")
+        print(f"Disambiguation Mode: {self.disambiguation_mode}")
         
-        # Use navigation-based VLM analysis
         task_description = getattr(self, 'current_task', f'Navigate to {itemtype}')
-        analyses = self.analyze_candidates_with_vlm(task_description, candidates)
         
-        # Check if VLM analysis failed completely
-        if analyses is None:
-            print(f"[FALLBACK] VLM analysis failed, using first object: {itemtype}")
-            return candidates[0]
+        if self.disambiguation_mode == "human_first":
+            # Mode 1: Human-first with VLM fallback
+            print("[HUMAN FIRST] Taking photos for human selection...")
+            analyses = self.take_candidate_photos_only(task_description, candidates)
+            
+            if analyses is None or all(a['analysis_quality'] == 'navigation_failed' for a in analyses):
+                print(f"[FALLBACK] Photo capture failed, using first object: {itemtype}")
+                return candidates[0]
+            
+            # Generate visual message for human selection
+            message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
+            self.comparison_path = comparison_path
+            
+            print(f"[HUMAN SELECTION] Waiting up to {self.human_selection_timeout} seconds for human choice...")
+            
+            # Get human input with timeout
+            try:
+                choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+                
+                if choice and choice != 'auto' and choice != 'timeout':
+                    print(f"[HUMAN SELECTED] Using human choice: {choice}")
+                    return self.get_object_by_choice(choice, analyses)
+                else:
+                    print("[TIMEOUT/AUTO] Human selection timed out, falling back to VLM analysis...")
+                    # Fallback: Run VLM analysis on the photos we already took
+                    vlm_analyses = self.run_vlm_analysis_on_photos(analyses, task_description)
+                    return self.select_best_candidate_from_vlm(vlm_analyses, itemtype)
+                    
+            except Exception as e:
+                print(f"[ERROR] Human selection failed: {e}, falling back to VLM...")
+                vlm_analyses = self.run_vlm_analysis_on_photos(analyses, task_description)
+                return self.select_best_candidate_from_vlm(vlm_analyses, itemtype)
         
-        # Simplified confidence-based auto-selection
-        if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
-            print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
-            return analyses[0]['object']
-        elif len(analyses) == 1:
-            print(f"Single candidate found, auto-selecting {itemtype}_{analyses[0]['index']}")
-            return analyses[0]['object']
-        
-        # Generate enhanced visual disambiguation message
-        message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
-        self.comparison_path = comparison_path  # Store for 'show' command
+        else:
+            # Mode 2: Original VLM-based auto selection
+            print("[VLM AUTO] Using VLM-based disambiguation...")
+            analyses = self.analyze_candidates_with_vlm(task_description, candidates)
+            
+            # Check if VLM analysis failed completely
+            if analyses is None:
+                print(f"[FALLBACK] VLM analysis failed, using first object: {itemtype}")
+                return candidates[0]
+            
+            # Simplified confidence-based auto-selection
+            if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
+                print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
+                return analyses[0]['object']
+            elif len(analyses) == 1:
+                print(f"Single candidate found, auto-selecting {itemtype}_{analyses[0]['index']}")
+                return analyses[0]['object']
+            
+            # Generate enhanced visual disambiguation message
+            message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
+            self.comparison_path = comparison_path  # Store for 'show' command
         
         # Display message
         print(message)
