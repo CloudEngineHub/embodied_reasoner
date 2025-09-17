@@ -110,7 +110,7 @@ class RocAgent(BaseAgent):
         self.current_gpt4o_reasoning = ""       # Store GPT-4o reasoning for VLM prompts
         
         # Disambiguation mode configuration
-        self.disambiguation_mode = "human_first_vlm_fallback"
+        self.disambiguation_mode = "human_only_random_fallback"
         # Options:
         #   "human_first_vlm_fallback" - Human first, VLM analysis as fallback
         #   "vlm_first_human_choice"   - VLM analysis first, human choice with confidence scores
@@ -1440,21 +1440,64 @@ class RocAgent(BaseAgent):
             
             # Navigate to this specific object
             nav_success = self.navigate_to_object_for_analysis(obj)
-            
+
             if nav_success:
                 successful_navigations += 1
-                
-                # Take photo from this position
+
+                # Check if this is an openable container (like Cabinet, Drawer, etc.)
+                should_open = (
+                    obj.get("openable", False) and
+                    not obj.get("isOpen", False) and
+                    obj.get("receptacle", False)
+                )
+
+                container_was_opened = False
+                if should_open:
+                    try:
+                        print(f"  -> Opening {obj['objectType']}_{i+1} for interior observation...")
+                        open_event = self.action.action_mapping["open"](self.controller, obj['objectId'])
+                        if open_event.metadata['lastActionSuccess']:
+                            container_was_opened = True
+                            self.update_event()
+                            # Take a photo after opening
+                            image_path_opened = self.save_frame({
+                                "analyzing": f"{obj['objectType']}_{i+1}_opened",
+                                "task": task_description,
+                                "candidate": i+1,
+                                "container_state": "opened",
+                                "total_candidates": len(candidates)
+                            })
+                        else:
+                            print(f"  -> Failed to open {obj['objectType']}_{i+1}: {open_event.metadata.get('errorMessage', 'Unknown error')}")
+                    except Exception as e:
+                        print(f"  -> Error opening container: {e}")
+
+                # Take photo from this position (either with container open or as-is)
                 image_path = self.save_frame({
                     "analyzing": f"{obj['objectType']}_{i+1}",
                     "task": task_description,
                     "candidate": i+1,
+                    "container_opened": container_was_opened,
                     "total_candidates": len(candidates)
                 })
-                
+
+                # Close the container if we opened it
+                if container_was_opened:
+                    try:
+                        print(f"  -> Closing {obj['objectType']}_{i+1} after observation...")
+                        close_event = self.action.action_mapping["close"](self.controller, obj['objectId'])
+                        if not close_event.metadata['lastActionSuccess']:
+                            print(f"  -> Warning: Failed to close {obj['objectType']}_{i+1}")
+                        self.update_event()
+                    except Exception as e:
+                        print(f"  -> Error closing container: {e}")
+
                 # No VLM analysis - just store photo info
                 confidence = 50  # Neutral confidence for human selection
-                vlm_response = f"Photo captured for human selection: {obj['objectType']}_{i+1}"
+                if container_was_opened:
+                    vlm_response = f"Photo captured with container opened for human selection: {obj['objectType']}_{i+1}"
+                else:
+                    vlm_response = f"Photo captured for human selection: {obj['objectType']}_{i+1}"
                 analysis_quality = "photo_only"
                 
             else:
@@ -1602,30 +1645,58 @@ Confidence: [0-100]"""
             
             # Navigate to this specific object
             nav_success = self.navigate_to_object_for_analysis(obj)
-            
+
             if nav_success:
                 successful_navigations += 1
-                
-                # Take photo from this position
+
+                # Check if this is an openable container (like Cabinet, Drawer, etc.)
+                should_open = (
+                    obj.get("openable", False) and
+                    not obj.get("isOpen", False) and
+                    obj.get("receptacle", False)
+                )
+
+                container_was_opened = False
+                if should_open:
+                    try:
+                        print(f"  -> Opening {obj['objectType']}_{i+1} for VLM analysis...")
+                        open_event = self.action.action_mapping["open"](self.controller, obj['objectId'])
+                        if open_event.metadata['lastActionSuccess']:
+                            container_was_opened = True
+                            self.update_event()
+                        else:
+                            print(f"  -> Failed to open {obj['objectType']}_{i+1}: {open_event.metadata.get('errorMessage', 'Unknown error')}")
+                    except Exception as e:
+                        print(f"  -> Error opening container: {e}")
+
+                # Take photo from this position (either with container open or as-is)
                 image_path = self.save_frame({
                     "analyzing": f"{obj['objectType']}_{i+1}",
                     "task": task_description,
                     "candidate": i+1,
+                    "container_opened": container_was_opened,
                     "total_candidates": len(candidates)
                 })
-                
+
                 # Enhanced VLM prompt with GPT-4o context
                 gpt4o_reasoning = getattr(self, 'current_gpt4o_reasoning', 'Agent decided to navigate to this object type.')
                 
+                # Add container state to the prompt if applicable
+                container_state = ""
+                if container_was_opened:
+                    container_state = f"\nContainer Status: This {obj['objectType']} has been OPENED for inspection."
+                elif obj.get("openable", False):
+                    container_state = f"\nContainer Status: This {obj['objectType']} is closed (could not be opened)."
+
                 prompt = f"""TASK: {task_description}
 AGENT'S REASONING: {gpt4o_reasoning}
 
 CURRENT ANALYSIS: {obj['objectType']} #{i+1}
 Position: x={obj['position']['x']:.1f}, z={obj['position']['z']:.1f}
-Spatial Description: {self.generate_spatial_description(obj, i, candidates)}
+Spatial Description: {self.generate_spatial_description(obj, i, candidates)}{container_state}
 
 Analyze this {obj['objectType']} for the given task:
-1. What objects/items are visible on or near this {obj['objectType']}?
+1. What objects/items are visible on or near this {obj['objectType']}?{' (including inside if opened)' if container_was_opened else ''}
 2. Based on the task and agent's reasoning, how suitable is this {obj['objectType']}?
 3. Provide a confidence score (0-100) for task completion relevance.
 
@@ -1645,6 +1716,17 @@ Confidence: [0-100]"""
                     vlm_response = f"VLM analysis failed: {str(e)}. Object was successfully reached for navigation."
                     confidence = 5  # Very low confidence for VLM failure
                     analysis_quality = "navigation_success_vlm_failed"
+
+                # Close the container if we opened it (after VLM analysis)
+                if container_was_opened:
+                    try:
+                        print(f"  -> Closing {obj['objectType']}_{i+1} after VLM analysis...")
+                        close_event = self.action.action_mapping["close"](self.controller, obj['objectId'])
+                        if not close_event.metadata['lastActionSuccess']:
+                            print(f"  -> Warning: Failed to close {obj['objectType']}_{i+1}")
+                        self.update_event()
+                    except Exception as e:
+                        print(f"  -> Error closing container: {e}")
                 
             else:
                 # Navigation failed - use spatial reasoning
