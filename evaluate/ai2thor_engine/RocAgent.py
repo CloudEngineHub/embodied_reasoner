@@ -103,13 +103,18 @@ class RocAgent(BaseAgent):
         # Enhanced navigation configuration
         self.enable_object_indexing = True      # For object indexing
         self.enable_dialogue_system = True      # For VLM-based disambiguation
+        self.enable_multi_view = True           # For multi-view observation
         self.confidence_gap_threshold = 30      # Auto-select if confidence gap > 30%
         self.user_response_timeout = 30         # Seconds to wait for user response
         self.current_task_description = ""      # Set by task context
         self.current_gpt4o_reasoning = ""       # Store GPT-4o reasoning for VLM prompts
         
         # Disambiguation mode configuration
-        self.disambiguation_mode = "human_first"  # Options: "vlm_auto", "human_first"
+        self.disambiguation_mode = "human_first_vlm_fallback"
+        # Options:
+        #   "human_first_vlm_fallback" - Human first, VLM analysis as fallback
+        #   "vlm_first_human_choice"   - VLM analysis first, human choice with confidence scores
+        #   "human_only_random_fallback" - Human only, random selection as fallback
         self.human_selection_timeout = 60        # Seconds to wait for human selection
         
         # Initialize object indexing
@@ -408,7 +413,12 @@ class RocAgent(BaseAgent):
         
         legal_navigations = self.get_legal_navigations()
         legal_interactions = self.get_legal_interactions()
-        
+
+        # Check if multi-view observation is needed for large objects
+        if self.enable_multi_view and hasattr(self, 'needs_multi_view_observation') and self.needs_multi_view_observation(item):
+            print(f"[DEBUG] Large object detected: {item['objectType']}, switching to multi-view observation")
+            return self.navigate_complete_view(itemtype)
+
         # self.update_legal_location()
         return image_fp, legal_navigations, legal_interactions
     
@@ -1352,9 +1362,14 @@ class RocAgent(BaseAgent):
             self.controller,
             position=view_position['position'],
             rotation=view_position['rotation'],
-            horizon=view_position.get('horizon', 0)
+            horizon=view_position.get('horizon', 60)  # Use 60-degree overhead view
         )
-        
+
+        if event.metadata['lastActionSuccess']:
+            # Apply vision optimization like standard navigation
+            self.adjust_height(obj)
+            self.adjust_view(obj)
+
         return event.metadata['lastActionSuccess']
 
     def return_to_position(self, original_position):
@@ -1366,10 +1381,8 @@ class RocAgent(BaseAgent):
             horizon=original_position['horizon']
         )
         
-        if event.metadata['lastActionSuccess']:
-            print("[POSITION] Successfully returned to original position")
-        else:
-            print("[WARNING] Failed to return to original position")
+        if not event.metadata['lastActionSuccess']:
+            print("[WARNING] Failed to return to original position!")
 
     def calculate_analysis_position(self, obj):
         """Calculate optimal viewing position for object analysis"""
@@ -1419,7 +1432,7 @@ class RocAgent(BaseAgent):
             'horizon': self.controller.last_event.metadata['agent']['cameraHorizon']
         }
         
-        print(f"[PHOTO CAPTURE] Taking photos of {len(candidates)} candidates individually")
+        print(f"                 Taking photos of {len(candidates)} candidates individually")
         successful_navigations = 0
         
         for i, obj in enumerate(candidates):
@@ -1546,9 +1559,22 @@ Confidence: [0-100]"""
         if not analyses:
             print(f"[ERROR] No analyses available for {itemtype}")
             return None
-            
-        best_analysis = analyses[0]
-        print(f"[VLM SELECTED] Best candidate: {itemtype}_{best_analysis['index']} (confidence: {best_analysis['confidence']}%)")
+
+        # Get the highest confidence score
+        max_confidence = analyses[0]['confidence']
+
+        # Find all candidates with the highest confidence
+        best_candidates = [a for a in analyses if a['confidence'] == max_confidence]
+
+        # If multiple candidates have the same highest confidence, randomly select one
+        if len(best_candidates) > 1:
+            import random
+            best_analysis = random.choice(best_candidates)
+            print(f"[VLM SELECTED] Multiple candidates with same confidence ({max_confidence}%), randomly selected: {itemtype}_{best_analysis['index']}")
+        else:
+            best_analysis = best_candidates[0]
+            print(f"[VLM SELECTED] Best candidate: {itemtype}_{best_analysis['index']} (confidence: {best_analysis['confidence']}%)")
+
         return best_analysis['object']
     
     def extract_target_detection(self, vlm_response):
@@ -2111,7 +2137,55 @@ Please choose:"""
         }
         
         return rotation
-    
+
+    def create_multi_view_composite(self, image_paths, itemtype):
+        """Create concatenated multi-view image with labeled views"""
+        try:
+            import cv2
+            import numpy as np
+
+            if len(image_paths) < 2:
+                return image_paths[0] if image_paths else None
+
+            # Load images
+            loaded_images = []
+            labels = []
+
+            for i, img_path in enumerate(image_paths):
+                img = cv2.imread(img_path)
+                if img is not None:
+                    # Generate view labels
+                    if i == 0:
+                        label = "Interaction View"
+                    else:
+                        label = f"Supplementary View {i}"
+
+                    # Add text label to image
+                    img_with_label = img.copy()
+                    cv2.rectangle(img_with_label, (10, 10), (350, 50), (255, 255, 255), -1)  # White background
+                    cv2.rectangle(img_with_label, (10, 10), (350, 50), (0, 0, 0), 2)  # Black border
+                    cv2.putText(img_with_label, label, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+
+                    loaded_images.append(img_with_label)
+                    labels.append(label)
+
+            if len(loaded_images) < 2:
+                return image_paths[0] if image_paths else None
+
+            # Concatenate images horizontally
+            composite = np.concatenate(loaded_images, axis=1)
+
+            # Save composite image
+            composite_path = image_paths[0].replace(f'_{itemtype}_1_interaction_', f'_{itemtype}_composite_')
+            cv2.imwrite(composite_path, composite)
+
+            print(f"   Created composite with {len(loaded_images)} views: {labels}")
+            return composite_path
+
+        except Exception as e:
+            print(f"[WARNING] Failed to create composite image: {e}")
+            return image_paths[0] if image_paths else None
+
     def navigate_complete_view(self, itemtype):
         # print(f"[DEBUG] Starting multi-view observation for {itemtype}")
         
@@ -2121,7 +2195,7 @@ Please choose:"""
             
             if len(objects) > 1 and self.enable_dialogue_system:
                 task_description = getattr(self, 'current_task_description', f"observe {itemtype}")
-                item = self.request_user_disambiguation(itemtype, objects, task_description)
+                item = self.request_user_disambiguation_improved(itemtype, objects)
             else:
                 item = objects[0]
         else:
@@ -2139,9 +2213,9 @@ Please choose:"""
                 return self.navigate(itemtype)
             
             # Observe each position sequentially (improved strategy)
-            best_observation = None
+            collected_images = []
             successful_views = 0
-            
+
             for i, (pos, rot) in enumerate(positions):
                 view_type = "Interaction" if i == 0 else f"Observation"
                 print(f"\nNavigating to view {i+1}/{len(positions)} ({view_type})...")
@@ -2156,7 +2230,7 @@ Please choose:"""
                     )
                     
                     if event.metadata['lastActionSuccess']:
-                        print(f"   [DEBUG] Navigation successful!")
+                        # print(f"   [DEBUG] Navigation successful!")
                         
                         # Apply original navigation's vision optimization
                         self.adjust_height(item)
@@ -2174,7 +2248,7 @@ Please choose:"""
                         })
                         
                         print(f"   Image saved: {image_fp}")
-                        best_observation = image_fp  # Update best observation result
+                        collected_images.append(image_fp)  # Collect all images for concatenation
                         successful_views += 1
                         
                     else:
@@ -2188,9 +2262,14 @@ Please choose:"""
             print(f"   • Successful observations: {successful_views}")
             print(f"   • Success rate: {successful_views/len(positions)*100:.1f}%")
             print(f"   • Strategy: Original interaction + {len(positions)-1} supplementary views")
-            
-            if best_observation:
-                return best_observation, True, True
+
+            # Create concatenated multi-view image for comprehensive analysis
+            if len(collected_images) > 1:
+                composite_image = self.create_multi_view_composite(collected_images, itemtype)
+                print(f"   Multi-view composite created: {composite_image}")
+                return composite_image, True, True
+            elif len(collected_images) == 1:
+                return collected_images[0], True, True
             else:
                 print(f"[ERROR] All multi-view attempts failed, falling back to standard navigation")
                 return self.navigate(itemtype)
@@ -2199,28 +2278,34 @@ Please choose:"""
             print(f"Small object detected, using standard single-view navigation")
             return self.navigate(itemtype)
     
-    def enable_enhanced_navigation(self, enable_indexing=True, enable_dialogue=False, enable_multi_view=True):
+    def enable_enhanced_navigation(self, enable_indexing=True, enable_dialogue=True, enable_multi_view=True,
+                                 disambiguation_mode="human_first_vlm_fallback"):
         """
         Enable enhanced navigation functionality
+        Args:
+            disambiguation_mode: One of:
+                - "human_first_vlm_fallback": Human first, VLM analysis as fallback
+                - "vlm_first_human_choice": VLM analysis first, human choice with confidence scores
+                - "human_only_random_fallback": Human only, random selection as fallback
         """
         self.enable_object_indexing = enable_indexing
-        self.enable_dialogue_system = enable_dialogue  
+        self.enable_dialogue_system = enable_dialogue
         self.enable_multi_view = enable_multi_view
-        
+        self.disambiguation_mode = disambiguation_mode
+
         print(f"Enhanced Navigation Configuration:")
         print(f"  • Object Indexing: {'[ENABLED]' if enable_indexing else '[DISABLED]'}")
         print(f"  • Dialogue System: {'[ENABLED]' if enable_dialogue else '[DISABLED]'}")
         print(f"  • Multi-view Observation: {'[ENABLED]' if enable_multi_view else '[DISABLED]'}")
+        print(f"  • Disambiguation Mode: {disambiguation_mode}")
         
         # Reinitialize object index
         if enable_indexing:
             self.init_object_indexing()
 
-    # ==================== NEW FEATURES ADDED 2025.9.4 ====================
-    
     def create_vlm_dialogue_visualization(self, obj_type, index, input_prompt, input_image_path, vlm_response, confidence, analysis_info=None):
         """
-        (9.4) Create a comprehensive visualization of VLM dialogue for debugging and review
+        Create a comprehensive visualization of VLM dialogue for debugging and review
         Creates a composite image showing: input image + prompt text + VLM response
         """
         import cv2
@@ -2348,51 +2433,49 @@ Please choose:"""
             return None
     
     def get_timestamp(self):
-        """(9.4) Get current timestamp for logging"""
         from datetime import datetime
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     def set_task_context(self, task_description, subtasks=None, task_type=None):
-        """
-        (9.4) Set task context information for dynamic prompt generation
-        """
         self.current_task = task_description
         self.current_subtasks = subtasks if subtasks else []
+        # Extract target object types from original task data (related_objects)
+        target_objects = []
+        if hasattr(self, 'related_objects') and self.related_objects:
+            for obj_id in self.related_objects:
+                obj_type = obj_id.split("|")[0] if "|" in obj_id else obj_id
+                target_objects.append(obj_type)
+
         self.task_context = {
             'task': task_description,
             'subtasks': subtasks,
             'task_type': task_type,  # e.g., 'pick_and_place', 'search', 'navigate'
-            'target_objects': self.extract_objects_from_task(task_description)
+            'target_objects': list(set(target_objects))  # Remove duplicates
         }
         print(f"Task context set:")
         print(f"   Main task: {task_description}")
         if subtasks:
             print(f"   Subtasks: {', '.join(subtasks)}")
     
-    def extract_objects_from_task(self, task_description):
-        """(9.4) Extract target objects from task description using keyword matching"""
-        common_objects = [
-            'creditcard', 'bowl', 'cup', 'plate', 'knife', 'fork', 'spoon',
-            'apple', 'bread', 'tomato', 'potato', 'egg', 'lettuce', 'mug',
-            'bottle', 'can', 'box', 'book', 'key', 'phone', 'remote',
-            'pen', 'pencil', 'paper', 'cloth', 'towel', 'soap'
-        ]
-        
-        task_lower = task_description.lower()
-        found_objects = []
-        for obj in common_objects:
-            if obj in task_lower:
-                found_objects.append(obj)
-        return found_objects
-    
     def generate_vlm_prompt_improved(self, obj_type, candidate_index):
-        """(9.4) Improved VLM prompt generation - direct and task-focused"""
-        
-        # Direct prompt without complex object extraction
+        """Improved VLM prompt generation - uses original task data instead of hardcoded keywords"""
+
         main_task = getattr(self, 'current_task', 'Navigation task')
-        subtasks = getattr(self, 'current_subtasks', [])
-        
+
+        # Extract target info from original task data (related_objects contains what we're looking for)
+        target_info = ""
+        if hasattr(self, 'related_objects') and self.related_objects:
+            # Parse object IDs to get object types
+            target_types = []
+            for obj_id in self.related_objects:
+                obj_type_from_id = obj_id.split("|")[0] if "|" in obj_id else obj_id
+                target_types.append(obj_type_from_id)
+            target_info = f"Looking for: {', '.join(set(target_types))}"
+        else:
+            target_info = "Looking for task-related items"
+
         prompt = f"""You are a household agent carrying out specific tasks. Your task: "{main_task}"
+{target_info}
 
 You need to choose between multiple {obj_type} objects. Currently you are looking at {obj_type}_{candidate_index}.
 
@@ -2408,283 +2491,21 @@ Give a confidence score (0-100) and explain your reasoning.
 Format:
 Reasoning: [why this location is promising or not for finding the target]
 Confidence: [0-100]"""
-        
+
         return prompt
     
     def generate_vlm_prompt(self, obj_type, candidate_index):
-        """(9.4) Dynamic VLM prompt generation based on task context - DEPRECATED, use improved version"""
+        """Dynamic VLM prompt generation based on task context - DEPRECATED, use improved version"""
         # Keep old version for compatibility but mark as deprecated
         return self.generate_vlm_prompt_improved(obj_type, candidate_index)
     
-    def estimate_bounding_box_from_visibility(self, obj):
-        """Estimate bounding box from object position and size - CloudRendering compatible"""
-        try:
-            # Get object dimensions and position
-            if 'axisAlignedBoundingBox' in obj:
-                bbox = obj['axisAlignedBoundingBox']
-                size = bbox['size']
-                
-                # Estimate screen space bounding box based on object size
-                # This is a rough approximation for CloudRendering compatibility
-                width_factor = min(max(size['x'] * 50, 80), 200)  # Scale factor
-                height_factor = min(max(size['y'] * 50, 60), 150)
-                
-                # Center on screen (rough estimate)
-                screen_width, screen_height = 400, 225  # Image dimensions
-                center_x, center_y = screen_width // 2, screen_height // 2
-                
-                # Create bounding box
-                x1 = max(0, center_x - width_factor // 2)
-                y1 = max(0, center_y - height_factor // 2)
-                x2 = min(screen_width, center_x + width_factor // 2)
-                y2 = min(screen_height, center_y + height_factor // 2)
-                
-                return (int(x1), int(y1), int(x2), int(y2))
-            
-            # Fallback: default bounding box
-            return (100, 50, 300, 175)
-            
-        except Exception as e:
-            print(f"[ERROR] Bounding box estimation failed: {e}")
-            return None
 
-    def get_object_bounding_box_2d(self, obj):
-        """(9.4) Get object 2D bounding box using AI2-THOR's built-in instance_detections2D"""
-        try:
-            # Use AI2-THOR's built-in 2D instance detection (now enabled with renderInstanceSegmentation=True)
-            if hasattr(self.controller.last_event, 'instance_detections2D'):
-                detections = self.controller.last_event.instance_detections2D
-                
-                if detections is not None and obj['objectId'] in detections:
-                    bbox = detections[obj['objectId']]
-                    print(f"Found 2D detection for {obj['objectId']}: {bbox}")
-                    
-                    # Handle different possible formats of bounding box data
-                    if isinstance(bbox, list) and len(bbox) >= 4:
-                        # Format: [x1, y1, x2, y2] or [x, y, width, height]
-                        x1, y1, x2, y2 = bbox[:4]
-                        # Ensure we have proper min/max coordinates
-                        return {
-                            'x_min': int(min(x1, x2)),
-                            'y_min': int(min(y1, y2)),
-                            'x_max': int(max(x1, x2)),
-                            'y_max': int(max(y1, y2))
-                        }
-                    elif isinstance(bbox, dict):
-                        # Handle dictionary format
-                        return {
-                            'x_min': int(bbox.get('x_min', bbox.get('x', 0))),
-                            'y_min': int(bbox.get('y_min', bbox.get('y', 0))),
-                            'x_max': int(bbox.get('x_max', bbox.get('x', 0) + bbox.get('width', 100))),
-                            'y_max': int(bbox.get('y_max', bbox.get('y', 0) + bbox.get('height', 100)))
-                        }
-                else:
-                    if detections is None:
-                        print(f"[ERROR] instance_detections2D is None for {obj['objectId']}")
-                    else:
-                        available_ids = list(detections.keys()) if detections else []
-                        print(f"[ERROR] Object {obj['objectId']} not found in instance_detections2D")
-                        print(f"Available object IDs: {available_ids[:5]}...")  # Show first 5
-            else:
-                print("[ERROR] instance_detections2D not available in last_event")
-            
-            # Fallback 1: Try to refresh detection data with a minimal action
-            print("Refreshing detection data...")
-            event = self.controller.step(action="Pass")  # No-op action to refresh data
-            
-            if hasattr(event, 'instance_detections2D') and event.instance_detections2D is not None and obj['objectId'] in event.instance_detections2D:
-                bbox = event.instance_detections2D[obj['objectId']]
-                print(f"[DEBUG] Found 2D detection after refresh: {bbox}")
-                if isinstance(bbox, list) and len(bbox) >= 4:
-                    x1, y1, x2, y2 = bbox[:4]
-                    return {
-                        'x_min': int(min(x1, x2)),
-                        'y_min': int(min(y1, y2)),
-                        'x_max': int(max(x1, x2)),
-                        'y_max': int(max(y1, y2))
-                    }
-            
-            # Fallback 2: Use reasonable default based on object visibility
-            if obj.get('visible', False):
-                print(f"Using fallback bounding box for visible object {obj['objectId']}")
-                frame_height, frame_width = self.controller.last_event.frame.shape[:2]
-                # Create a reasonable-sized box in the center
-                center_x, center_y = frame_width // 2, frame_height // 2
-                box_width, box_height = min(200, frame_width // 3), min(150, frame_height // 3)
-                
-                return {
-                    'x_min': max(0, center_x - box_width // 2),
-                    'y_min': max(0, center_y - box_height // 2),
-                    'x_max': min(frame_width, center_x + box_width // 2),
-                    'y_max': min(frame_height, center_y + box_height // 2)
-                }
-            
-            print(f"No bounding box available for {obj['objectId']}")
-            return None
-            
-        except Exception as e:
-            print(f"Error getting 2D bounding box for {obj.get('objectId', 'unknown')}: {e}")
-            return None
     
-    def project_3d_bbox_to_2d(self, obj):
-        """(9.4) Project 3D bounding box to 2D screen coordinates (fallback method)"""
-        try:
-            # Get object 3D bounding box
-            bbox_3d = obj.get('axisAlignedBoundingBox', {})
-            if not bbox_3d:
-                return None
-            
-            # Simple projection approximation
-            # This is a basic implementation - you might want to use proper camera projection
-            center = bbox_3d.get('center', {})
-            size = bbox_3d.get('size', {})
-            
-            if not center or not size:
-                return None
-            
-            # Estimate 2D box based on object visibility and distance
-            frame_height, frame_width = self.controller.last_event.frame.shape[:2]
-            
-            # Basic projection (simplified)
-            estimated_width = min(200, frame_width // 4)  # Arbitrary estimation
-            estimated_height = min(150, frame_height // 4)
-            
-            center_x = frame_width // 2
-            center_y = frame_height // 2
-            
-            return {
-                'x_min': max(0, center_x - estimated_width // 2),
-                'y_min': max(0, center_y - estimated_height // 2),
-                'x_max': min(frame_width, center_x + estimated_width // 2),
-                'y_max': min(frame_height, center_y + estimated_height // 2)
-            }
-            
-        except Exception as e:
-            print(f"Error in 3D to 2D projection: {e}")
-            return None
     
-    def draw_bounding_box(self, image, bbox, label, color=(0, 255, 0), thickness=3):
-        """(9.4) Draw bounding box and label on image"""
-        import cv2
-        
-        if bbox is None:
-            print(f"[ERROR] No bounding box to draw for {label}")
-            return image
-            
-        image_copy = image.copy()
-        
-        try:
-            # Handle both dictionary and tuple formats
-            if isinstance(bbox, dict):
-                x1, y1 = bbox['x_min'], bbox['y_min']
-                x2, y2 = bbox['x_max'], bbox['y_max']
-            elif isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
-                x1, y1, x2, y2 = bbox[:4]
-            else:
-                print(f"[ERROR] Invalid bounding box format for {label}: {bbox}")
-                return image
-            
-            print(f"Drawing bounding box for {label}: ({x1}, {y1}) to ({x2}, {y2})")
-            
-            # Draw rectangle
-            cv2.rectangle(
-                image_copy,
-                (int(x1), int(y1)),  # x1, y1
-                (int(x2), int(y2)),  # x2, y2
-                color,
-                thickness
-            )
-        
-            # Add label background
-            label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            cv2.rectangle(
-                image_copy,
-                (int(x1), int(y1) - label_size[1] - 10),
-                (int(x1) + label_size[0] + 10, int(y1)),
-                color,
-                -1
-            )
-            
-            # Add label text
-            cv2.putText(
-                image_copy,
-                label,
-                (int(x1) + 5, int(y1) - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 255),
-                2
-            )
-            
-        except Exception as e:
-            print(f"Error drawing bounding box for {label}: {e}")
-        
-        return image_copy
     
-    def generate_candidate_images_with_boxes(self, candidates):
-        """(9.4) Generate images with bounding boxes for each candidate object"""
-        import cv2
-        import numpy as np
-        
-        self.candidate_images = []
-        
-        for i, obj in enumerate(candidates):
-            obj_type = obj['objectType']
-            print(f"Capturing image for {obj_type}_{i+1}")
-            
-            # Navigate to observe this candidate
-            success = self.navigate_to_observe_candidate(obj)
-            if not success:
-                print(f"   [Warning] Failed to navigate to {obj_type}_{i+1}")
-                continue
-            
-            # Get current frame
-            frame = self.controller.last_event.frame
-            
-            # Get object bounding box
-            bbox_2d = self.get_object_bounding_box_2d(obj)
-            
-            # Draw bounding box on image
-            if bbox_2d:
-                # Choose color: Green for first, Blue for others
-                color = (0, 255, 0) if i == 0 else (255, 0, 0)
-                image_with_box = self.draw_bounding_box(
-                    frame, 
-                    bbox_2d, 
-                    label=f"{obj_type}_{i+1}",
-                    color=color
-                )
-                print(f"   [DEBUG] Bounding box drawn for {obj_type}_{i+1}")
-            else:
-                image_with_box = frame
-                print(f"   [ERROR] No bounding box for {obj_type}_{i+1}, using plain image")
-            
-            # Save image
-            image_path = self.save_frame({
-                "step_count": str(self.step_count),
-                "candidate": f"{obj_type}_{i+1}",
-                "with_box": bbox_2d is not None,
-                "action": "candidate_capture"
-            })
-            
-            # Overwrite with the boxed version
-            cv2.imwrite(image_path, cv2.cvtColor(image_with_box, cv2.COLOR_RGB2BGR))
-            
-            self.candidate_images.append({
-                'index': i+1,
-                'object': obj,
-                'image_path': image_path,
-                'has_box': bbox_2d is not None,
-                'bbox': bbox_2d
-            })
-            
-            print(f"   Image saved: {image_path}")
-        
-        print(f"Generated {len(self.candidate_images)} candidate images")
-        return self.candidate_images
     
     def create_candidate_comparison_image(self, analyses):
-        """(9.4) Create side-by-side comparison of all candidate objects"""
+        """Create side-by-side comparison of all candidate objects"""
         import cv2
         import numpy as np
         
@@ -2774,7 +2595,7 @@ Confidence: [0-100]"""
         return comparison_path
     
     def extract_target_detection(self, vlm_response):
-        """(9.4) Extract whether target objects were found from VLM response"""
+        """Extract whether target objects were found from VLM response"""
         response_lower = vlm_response.lower()
         
         # Check for old format first
@@ -2803,7 +2624,7 @@ Confidence: [0-100]"""
         return confidence > 70
     
     def extract_visible_objects(self, vlm_response):
-        """(9.4) Extract reasoning from VLM response"""
+        """Extract reasoning from VLM response"""
         try:
             # Try new format first
             if 'Reasoning:' in vlm_response:
@@ -2818,11 +2639,37 @@ Confidence: [0-100]"""
         return "analysis pending"
     
     def analyze_candidates_with_vlm_improved(self, candidates):
-        """(9.4) Enhanced VLM analysis with dynamic prompts and visualization"""
+        """Enhanced VLM analysis with dynamic prompts and visualization"""
         analyses = []
         
-        # First generate images with bounding boxes for all candidates
-        candidate_images = self.generate_candidate_images_with_boxes(candidates)
+        # First generate images for all candidates (simplified - no bounding boxes)
+        candidate_images = []
+        for i, obj in enumerate(candidates):
+            obj_type = obj['objectType']
+            print(f"Capturing image for {obj_type}_{i+1}")
+
+            # Navigate to observe this candidate
+            success = self.navigate_to_observe_candidate(obj)
+            if success:
+                # Save simple image without bounding box
+                image_path = self.save_frame({
+                    "step_count": str(self.step_count),
+                    "candidate": f"{obj_type}_{i+1}",
+                    "action": "candidate_capture"
+                })
+
+                candidate_images.append({
+                    'index': i+1,
+                    'object': obj,
+                    'image_path': image_path,
+                    'has_box': False,  # No bounding box
+                    'bbox': None
+                })
+                print(f"   Image saved: {image_path}")
+            else:
+                print(f"   [Warning] Failed to navigate to {obj_type}_{i+1}")
+
+        print(f"Generated {len(candidate_images)} candidate images")
         
         for i, img_info in enumerate(candidate_images):
             obj = img_info['object']
@@ -2885,7 +2732,7 @@ Confidence: [0-100]"""
         return sorted(analyses, key=lambda x: x['confidence'], reverse=True)
     
     def generate_visual_disambiguation_message(self, candidates, analyses):
-        """(9.4) Generate enhanced disambiguation message with image references"""
+        """Generate enhanced disambiguation message with image references"""
         obj_type = candidates[0]['objectType']
         best = analyses[0]
         
@@ -2951,7 +2798,7 @@ You have {self.user_response_timeout} seconds to respond.
         return message, comparison_path
     
     def create_web_selection_interface(self, analyses, comparison_path):
-        """(9.4) Create web interface for visual candidate selection"""
+        """Create web interface for visual candidate selection"""
         try:
             import threading
             import webbrowser
@@ -3150,7 +2997,7 @@ You have {self.user_response_timeout} seconds to respond.
             return None
 
     def create_gui_selection_window(self, analyses, comparison_path):
-        """(9.4) Create GUI window for visual candidate selection"""
+        """Create GUI window for visual candidate selection"""
         try:
             import tkinter as tk
             from tkinter import ttk
@@ -3280,7 +3127,7 @@ You have {self.user_response_timeout} seconds to respond.
             return self.get_user_input_with_text_fallback(analyses)
     
     def get_user_input_with_text_fallback(self, analyses):
-        """(9.4) Text fallback for when GUI is not available"""
+        """Text fallback for when GUI is not available"""
         print(f"\n>>> Your choice: ", end='', flush=True)
         
         try:
@@ -3325,16 +3172,23 @@ You have {self.user_response_timeout} seconds to respond.
             return "auto"
     
     def get_user_input_with_image_support(self, analyses):
-        """(9.4) Enhanced user input with GUI support"""
+        """Enhanced user input with GUI support"""
         # Try GUI first, fallback to text if needed
         comparison_path = getattr(self, 'comparison_path', None)
-        
+
+        # Extract object type from analyses
+        object_type = 'Object'
+        if analyses and len(analyses) > 0:
+            first_analysis = analyses[0]
+            if 'object' in first_analysis and 'objectType' in first_analysis['object']:
+                object_type = first_analysis['object']['objectType']
+
         # Prioritize trying Web Dashboard's disambiguation functionality
         try:
             from web_ui import start_disambiguation_web
             web_disambiguation_data = {
                 'task_name': getattr(self, 'current_task', 'Navigation task'),
-                'object_type': itemtype if 'itemtype' in locals() else 'Object',
+                'object_type': object_type,
                 'candidates': [
                     {
                         'image_path': analysis.get('image_path', ''),
@@ -3345,10 +3199,16 @@ You have {self.user_response_timeout} seconds to respond.
                 ]
             }
             
-            web_result = start_disambiguation_web(web_disambiguation_data)
+            web_result = start_disambiguation_web(web_disambiguation_data, timeout=self.human_selection_timeout)
             if web_result is not None:
-                print(f"[INFO] Web Dashboard selection: Option {web_result}")
-                return web_result
+                if web_result == -1:
+                    # Special value: timeout, need VLM analysis
+                    print(f"[INFO] Web Dashboard timeout: Triggering VLM analysis")
+                    return 'timeout'  # Signal to trigger VLM analysis
+                else:
+                    # Normal human selection
+                    print(f"[INFO] Web Dashboard selection: Option {web_result}")
+                    return web_result
         except ImportError:
             # Web dashboard not available, continue using other methods
             pass
@@ -3375,7 +3235,7 @@ You have {self.user_response_timeout} seconds to respond.
         
         task_description = getattr(self, 'current_task', f'Navigate to {itemtype}')
         
-        if self.disambiguation_mode == "human_first":
+        if self.disambiguation_mode == "human_first_vlm_fallback":
             # Mode 1: Human-first with VLM fallback
             print("[HUMAN FIRST] Taking photos for human selection...")
             analyses = self.take_candidate_photos_only(task_description, candidates)
@@ -3401,50 +3261,164 @@ You have {self.user_response_timeout} seconds to respond.
                     print("[TIMEOUT/AUTO] Human selection timed out, falling back to VLM analysis...")
                     # Fallback: Run VLM analysis on the photos we already took
                     vlm_analyses = self.run_vlm_analysis_on_photos(analyses, task_description)
-                    return self.select_best_candidate_from_vlm(vlm_analyses, itemtype)
-                    
+
+                    # Update Web UI history with VLM analysis results
+                    self.update_web_ui_disambiguation_history(vlm_analyses, task_description, itemtype)
+
+                    # If VLM analysis produces valid results, use them
+                    if vlm_analyses and any(analysis.get('confidence', 0) > 25 for analysis in vlm_analyses):
+                        return self.select_best_candidate_from_vlm(vlm_analyses, itemtype)
+                    else:
+                        # VLM failed, randomly select a candidate
+                        import random
+                        selected = random.choice(candidates)
+                        selected_index = candidates.index(selected) + 1
+                        print(f"[FALLBACK] VLM analysis failed, randomly selecting {itemtype}_{selected_index}")
+                        return selected
+
             except Exception as e:
-                print(f"[ERROR] Human selection failed: {e}, falling back to VLM...")
-                vlm_analyses = self.run_vlm_analysis_on_photos(analyses, task_description)
-                return self.select_best_candidate_from_vlm(vlm_analyses, itemtype)
-        
-        else:
-            # Mode 2: Original VLM-based auto selection
-            print("[VLM AUTO] Using VLM-based disambiguation...")
+                print(f"[ERROR] Human selection failed: {e}, randomly selecting candidate")
+                import random
+                selected = random.choice(candidates)
+                selected_index = candidates.index(selected) + 1
+                print(f"[FALLBACK] Randomly selecting {itemtype}_{selected_index}")
+                return selected
+
+        elif self.disambiguation_mode == "vlm_first_human_choice":
+            # Mode 2: VLM analysis first, human choice with confidence scores
+            print("[VLM FIRST] Running VLM analysis to provide confidence scores...")
             analyses = self.analyze_candidates_with_vlm(task_description, candidates)
-            
+
             # Check if VLM analysis failed completely
             if analyses is None:
-                print(f"[FALLBACK] VLM analysis failed, using first object: {itemtype}")
-                return candidates[0]
-            
-            # Simplified confidence-based auto-selection
-            if len(analyses) > 1 and analyses[0]['confidence'] - analyses[1]['confidence'] > self.confidence_gap_threshold:
-                print(f"High confidence gap ({analyses[0]['confidence']}% vs {analyses[1]['confidence']}%), auto-selecting {itemtype}_{analyses[0]['index']}")
-                return analyses[0]['object']
-            elif len(analyses) == 1:
-                print(f"Single candidate found, auto-selecting {itemtype}_{analyses[0]['index']}")
-                return analyses[0]['object']
-            
-            # Generate enhanced visual disambiguation message
+                import random
+                selected = random.choice(candidates)
+                selected_index = candidates.index(selected) + 1
+                print(f"[FALLBACK] VLM analysis failed, randomly selecting {itemtype}_{selected_index}")
+                return selected
+
+            # Update Web UI with VLM confidence scores immediately
+            self.update_web_ui_disambiguation_history(analyses, task_description, itemtype)
+
+            # Generate visual disambiguation message with VLM confidence scores
             message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
-            self.comparison_path = comparison_path  # Store for 'show' command
-        
-        # Display message
-        print(message)
-        
-        # Get user response with enhanced input handling
-        response = self.get_user_input_with_image_support(analyses)
-        
-        # Parse response and return selection
-        selected = self.parse_user_response(response, candidates, analyses)
-        return selected
-    
+            self.comparison_path = comparison_path
+
+            print(f"[VLM ANALYSIS] VLM has analyzed all candidates. Confidence scores:")
+            for analysis in analyses:
+                print(f"   • {itemtype}_{analysis['index']}: {analysis['confidence']}% - {analysis.get('analysis', 'No reasoning')[:80]}...")
+
+            print(f"[HUMAN CHOICE] Please make your selection based on VLM analysis...")
+
+            # Get human input with VLM-provided confidence scores
+            choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+
+            if choice and choice != 'auto' and choice != 'timeout':
+                print(f"[HUMAN SELECTED] Using human choice: {choice}")
+                return self.get_object_by_choice(choice, analyses)
+            else:
+                # Human didn't select, use VLM recommendation
+                print("[AUTO] Human didn't select, using VLM recommendation...")
+                return self.select_best_candidate_from_vlm(analyses, itemtype)
+
+        elif self.disambiguation_mode == "human_only_random_fallback":
+            # Mode 3: Human only, random selection as fallback
+            print("[HUMAN ONLY] Taking photos for human selection (no VLM analysis)...")
+            analyses = self.take_candidate_photos_only(task_description, candidates)
+
+            if analyses is None or all(a['analysis_quality'] == 'navigation_failed' for a in analyses):
+                print(f"[FALLBACK] Photo capture failed, using first object: {itemtype}")
+                return candidates[0]
+
+            # Generate visual message for human selection (no VLM confidence scores)
+            message, comparison_path = self.generate_visual_disambiguation_message(candidates, analyses)
+            self.comparison_path = comparison_path
+
+            print(f"[HUMAN SELECTION] Waiting up to {self.human_selection_timeout} seconds for human choice...")
+
+            # Get human input with timeout
+            choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+
+            if choice and choice != 'auto' and choice != 'timeout':
+                print(f"[HUMAN SELECTED] Using human choice: {choice}")
+                return self.get_object_by_choice(choice, analyses)
+            else:
+                # Human didn't select, random fallback (no VLM)
+                print("[RANDOM FALLBACK] Human selection timed out, randomly selecting...")
+                import random
+                selected = random.choice(candidates)
+                selected_index = candidates.index(selected) + 1
+                print(f"[RANDOM] Randomly selected {itemtype}_{selected_index}")
+                return selected
+
+        else:
+            # Invalid mode, fallback to random selection
+            print(f"[ERROR] Unknown disambiguation mode: {self.disambiguation_mode}")
+            print(f"[FALLBACK] Using random selection...")
+            import random
+            selected = random.choice(candidates)
+            selected_index = candidates.index(selected) + 1
+            print(f"[RANDOM] Randomly selected {itemtype}_{selected_index}")
+            return selected
+
+    def update_web_ui_disambiguation_history(self, vlm_analyses, task_description, itemtype):
+        """Update Web UI disambiguation history with VLM analysis results"""
+        try:
+            if not vlm_analyses:
+                return
+
+            # Try to update the Web UI monitor directly
+            try:
+                from web_ui.server import monitor
+                print(f"[DEBUG] Monitor import successful: {monitor is not None}")
+
+                if monitor and hasattr(monitor, 'disambiguation_history'):
+                    print(f"[DEBUG] Monitor has disambiguation_history: {len(monitor.disambiguation_history)} entries")
+
+                    # Find the most recent disambiguation entry and update it
+                    if monitor.disambiguation_history:
+                        latest_entry = monitor.disambiguation_history[-1]
+                        print(f"[DEBUG] Latest entry candidates: {len(latest_entry.get('candidates', []))}")
+                        print(f"[DEBUG] VLM analyses: {len(vlm_analyses)}")
+
+                        # Update the candidates with VLM analysis results
+                        if 'candidates' in latest_entry:
+                            for i, analysis in enumerate(vlm_analyses):
+                                if i < len(latest_entry['candidates']):
+                                    old_confidence = latest_entry['candidates'][i]['confidence']
+                                    new_confidence = analysis.get('confidence', 25)
+                                    # Update confidence and reasoning with VLM results
+                                    latest_entry['candidates'][i]['confidence'] = new_confidence
+                                    latest_entry['candidates'][i]['reasoning'] = analysis.get('analysis', 'VLM analysis completed')
+
+                                    print(f"[DEBUG] Updated candidate {i+1}: {old_confidence}% → {new_confidence}%")
+
+                            # Add a note about VLM analysis completion
+                            latest_entry['vlm_analysis_completed'] = True
+                            latest_entry['final_selection_method'] = 'vlm_analysis'
+
+                            print(f"[WEB UI] Updated disambiguation history with VLM analysis results")
+                        else:
+                            print(f"[DEBUG] No 'candidates' key in latest entry: {latest_entry.keys()}")
+                    else:
+                        print(f"[DEBUG] No disambiguation history entries found")
+                else:
+                    print(f"[DEBUG] Monitor check failed: monitor={monitor is not None}, has_history={hasattr(monitor, 'disambiguation_history') if monitor else False}")
+
+            except ImportError:
+                # Web UI not available
+                pass
+            except Exception as e:
+                print(f"[WARNING] Failed to update Web UI history: {e}")
+
+        except Exception as e:
+            print(f"[WARNING] Error updating Web UI disambiguation history: {e}")
+
     # ==================== ENHANCED FEATURES INITIALIZATION ====================
     
     def enable_enhanced_features(self, enable_indexing=True, enable_dialogue=True, confidence_threshold=30, timeout=30):
         """
-        (9.4) Enable enhanced multi-object disambiguation features
+        Enable enhanced multi-object disambiguation features
         """
         print(f"Configuring Enhanced Features (9.4)...")
         

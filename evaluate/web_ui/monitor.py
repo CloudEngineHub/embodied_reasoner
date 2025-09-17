@@ -178,8 +178,8 @@ class AgentMonitor:
         
         # Add enhanced data for better tracking
         disambiguation_data['start_time'] = datetime.now().isoformat()
-        disambiguation_data['task_id'] = self.current_task.get('id', 'unknown') if self.current_task else 'unknown'
-        disambiguation_data['step'] = self.current_task.get('step_count', 0) if self.current_task else 0
+        disambiguation_data['task_id'] = self.current_task.get('id', 'unknown') if self.current_task and isinstance(self.current_task, dict) else 'unknown'
+        disambiguation_data['step'] = self.current_task.get('step_count', 0) if self.current_task and isinstance(self.current_task, dict) else 0
         
         # Schedule broadcast if event loop is running
         self._schedule_broadcast()
@@ -210,10 +210,15 @@ class AgentMonitor:
             self.disambiguation_history.append(completed_disambiguation)
             
             # Log this as an interaction too
+            selected_obj = completed_disambiguation.get('selected_object')
+            reasoning = 'Unknown'
+            if selected_obj and isinstance(selected_obj, dict):
+                reasoning = selected_obj.get('reasoning', 'Unknown')
+
             self.add_interaction({
                 'type': 'disambiguation_complete',
                 'action': f"Selected {self.disambiguation_data.get('object_type', 'object')} option {selection}",
-                'content': f"Choice: {completed_disambiguation.get('selected_object', {}).get('reasoning', 'Unknown')}",
+                'content': f"Choice: {reasoning}",
                 'step': completed_disambiguation.get('step', 0)
             })
         

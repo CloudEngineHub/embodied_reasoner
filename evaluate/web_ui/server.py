@@ -147,22 +147,18 @@ def start_disambiguation_web(disambiguation_data: dict, timeout: int = 30) -> Op
         while monitor.user_selection is None:
             time.sleep(0.5)
             if time.time() - start_time > timeout:
-                print(f"Web disambiguation timed out ({timeout}s), using smart recommendation")
-                # Timeout, use the highest confidence option
-                if disambiguation_data.get('candidates'):
-                    best_idx = max(range(len(disambiguation_data['candidates'])),
-                                 key=lambda i: disambiguation_data['candidates'][i].get('confidence', 0))
-                    selection = best_idx + 1
-                    monitor.set_user_selection(selection)
-                    print(f"Automatically selected highest confidence option: Option {selection}")
-                else:
-                    # If no candidates, return 1 as default
-                    monitor.set_user_selection(1)
-                    print(f"No candidates, using default option: Option 1")
+                print(f"Web disambiguation timed out ({timeout}s), triggering VLM analysis")
+                # Signal timeout to RocAgent for VLM analysis
+                # Use special value -1 to indicate timeout (need VLM analysis)
+                monitor.set_user_selection(-1)
+                print(f"Web UI timeout: Returning control to RocAgent for VLM analysis")
                 break
        
         result = monitor.user_selection
-        print(f"Web disambiguation completed, selection: Option {result}")
+        if result == -1:
+            print(f"Web disambiguation completed: TIMEOUT (will trigger VLM analysis)")
+        else:
+            print(f"Web disambiguation completed, selection: Option {result}")
         return result
        
     except Exception as e:
