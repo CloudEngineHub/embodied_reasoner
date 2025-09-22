@@ -21,7 +21,7 @@ except ImportError as e:
     def log_task_start(data): pass
     def log_task_complete(success, data=None): pass 
     def log_interaction(data): pass
-MODE = "API" # choose ["LOCAL","API"]
+MODE = "LOCAL" # choose ["LOCAL","API"]
 PLATFORM_TYPE="GPU" 
 
 MAX_MODEL_INFER_COUNT=3
@@ -355,9 +355,57 @@ if __name__ == "__main__":
         parser.add_argument("--port", type=int, default=10000, help="")
         parser.add_argument("--cur_count", type=int, default=1, help="")
         parser.add_argument("--total_count", type=int, default=4, help="")
+        parser.add_argument("--task_ids", type=str, default=None, help="Comma-separated task indices to run")
+        parser.add_argument("--dashboard_port", type=int, default=8080, help="Web dashboard port")
+        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard")
         args = parser.parse_args()
         print(args)
         data = load_data(args)
+
+        # Initialize Web Dashboard for LOCAL mode
+        dashboard_thread = None
+        dialogue_enabled = False
+
+        # Check if dialogue system is enabled
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), 'ai2thor_engine'))
+            from ai2thor_engine.RocAgent import RocAgent
+
+            # Check RocAgent default settings
+            dialogue_enabled = getattr(RocAgent, '_default_enable_dialogue_system', False)
+
+            # Fallback: check source code for dialogue system setting
+            if not dialogue_enabled:
+                try:
+                    import inspect
+                    source = inspect.getsource(RocAgent.__init__)
+                    if 'self.enable_dialogue_system = True' in source:
+                        dialogue_enabled = True
+                except:
+                    pass
+        except Exception as e:
+            print(f"Warning: Failed to check dialogue system status: {e}")
+            dialogue_enabled = False
+
+        # Launch Web Dashboard if conditions are met
+        if dialogue_enabled and not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
+            print(f"\n[INFO] Starting Web Dashboard on port {args.dashboard_port}...")
+            dashboard_thread = start_dashboard_server(port=args.dashboard_port, auto_open=False)
+            if dashboard_thread:
+                print(f"[INFO] Web Dashboard successfully started at: http://localhost:{args.dashboard_port}")
+                import time
+                time.sleep(2)  # Allow dashboard initialization
+            else:
+                print("[ERROR] Web Dashboard failed to start")
+        elif not dialogue_enabled:
+            print("[INFO] Dialogue system is disabled - Web Dashboard not started")
+        elif args.no_dashboard:
+            print("[INFO] Web Dashboard disabled via --no_dashboard flag")
+        elif not WEB_DASHBOARD_AVAILABLE:
+            print("[WARNING] Web Dashboard module not available for import")
+
         success_count = 0
         # controller = None
         controller = Controller(

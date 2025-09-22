@@ -105,7 +105,6 @@ class RocAgent(BaseAgent):
         self.enable_dialogue_system = True      # For VLM-based disambiguation
         self.enable_multi_view = True           # For multi-view observation
         self.confidence_gap_threshold = 30      # Auto-select if confidence gap > 30%
-        self.user_response_timeout = 30         # Seconds to wait for user response
         self.current_task_description = ""      # Set by task context
         self.current_gpt4o_reasoning = ""       # Store GPT-4o reasoning for VLM prompts
         
@@ -1528,20 +1527,6 @@ class RocAgent(BaseAgent):
         # Return all analyses for human selection (don't sort by confidence)
         return analyses
     
-    def get_user_selection_with_timeout(self, analyses, comparison_path, timeout):
-        """Get user selection with timeout, fallback to existing UI methods"""
-        # Save the current timeout and use the provided one
-        original_timeout = self.user_response_timeout
-        self.user_response_timeout = timeout
-        
-        try:
-            # Use the existing user input method with image support
-            result = self.get_user_input_with_image_support(analyses)
-            return result
-        finally:
-            # Restore original timeout
-            self.user_response_timeout = original_timeout
-    
     def get_object_by_choice(self, choice, analyses):
         """Get object by user choice number"""
         try:
@@ -1858,31 +1843,9 @@ Please choose:"""
             message += f"\n  Type '{analysis['index']}' for {obj_type}_{analysis['index']}"
             
         message += f"\n  Type 'auto' to use my recommendation"
-        message += f"\n\n  You have {self.user_response_timeout} seconds to respond."
+        message += f"\n\n  You have {self.human_selection_timeout} seconds to respond."
         
         return message
-    
-    def get_user_input(self, message, timeout=30):
-        """Get user input with timeout"""
-        print(message)
-        print(f"\n>>> Your choice: ", end='', flush=True)
-        
-        try:
-            import select
-            import sys
-            
-            # Check if input is available within timeout
-            ready, _, _ = select.select([sys.stdin], [], [], timeout)
-            if ready:
-                response = sys.stdin.readline().strip()
-                return response
-            else:
-                print(f"\nTimeout reached. Using auto-recommendation.")
-                return "auto"
-                
-        except Exception as e:
-            print(f"\n[ERROR] Input error: {e}. Using auto-recommendation.")
-            return "auto"
     
     def parse_user_response(self, response, candidates, analyses):
         """Parse user response with fallback to recommendation"""
@@ -1926,7 +1889,7 @@ Please choose:"""
         message = self.generate_disambiguation_message(task_description, candidates, analyses)
         
         # Get user response (with timeout)
-        response = self.get_user_input(message, timeout=self.user_response_timeout)
+        response = self.get_user_input_with_image_support(analyses)
         
         # Parse response and return selection
         selected = self.parse_user_response(response, candidates, analyses)
@@ -2873,7 +2836,7 @@ Please enter:
   • 'show' to display the comparison image again
   • 'vlm X' to review VLM analysis for option X
 
-You have {self.user_response_timeout} seconds to respond.
+You have {self.human_selection_timeout} seconds to respond.
 {'='*80}
 """
         
@@ -3058,7 +3021,7 @@ You have {self.user_response_timeout} seconds to respond.
                 print("[ERROR] Could not auto-open browser, please visit the URL manually")
             
             # Wait for selection with timeout
-            timeout = getattr(self, 'user_response_timeout', 60)
+            timeout = getattr(self, 'human_selection_timeout', 60)
             start_time = time.time()
             
             while result_container['selection'] is None:
@@ -3196,7 +3159,7 @@ You have {self.user_response_timeout} seconds to respond.
                     return self.selection
             
             # Create and run selector
-            selector = CandidateSelector(analyses, comparison_path, self.user_response_timeout)
+            selector = CandidateSelector(analyses, comparison_path, self.human_selection_timeout)
             selection = selector.run()
             
             return selection if selection else 'auto'
@@ -3217,7 +3180,7 @@ You have {self.user_response_timeout} seconds to respond.
             import sys
             
             # Check if input is available within timeout
-            ready, _, _ = select.select([sys.stdin], [], [], self.user_response_timeout)
+            ready, _, _ = select.select([sys.stdin], [], [], self.human_selection_timeout)
             if ready:
                 response = sys.stdin.readline().strip()
                 
@@ -3246,7 +3209,7 @@ You have {self.user_response_timeout} seconds to respond.
                 
                 return response
             else:
-                print(f"\nTimeout reached ({self.user_response_timeout}s). Using intelligent recommendation.")
+                print(f"\nTimeout reached ({self.human_selection_timeout}s). Using intelligent recommendation.")
                 return "auto"
                 
         except Exception as e:
@@ -3334,7 +3297,7 @@ You have {self.user_response_timeout} seconds to respond.
             
             # Get human input with timeout
             try:
-                choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+                choice = self.get_user_input_with_image_support(analyses)
                 
                 if choice and choice != 'auto' and choice != 'timeout':
                     print(f"[HUMAN SELECTED] Using human choice: {choice}")
@@ -3393,7 +3356,7 @@ You have {self.user_response_timeout} seconds to respond.
             print(f"[HUMAN CHOICE] Please make your selection based on VLM analysis...")
 
             # Get human input with VLM-provided confidence scores
-            choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+            choice = self.get_user_input_with_image_support(analyses)
 
             if choice and choice != 'auto' and choice != 'timeout':
                 print(f"[HUMAN SELECTED] Using human choice: {choice}")
@@ -3419,7 +3382,7 @@ You have {self.user_response_timeout} seconds to respond.
             print(f"[HUMAN SELECTION] Waiting up to {self.human_selection_timeout} seconds for human choice...")
 
             # Get human input with timeout
-            choice = self.get_user_selection_with_timeout(analyses, comparison_path, timeout=self.human_selection_timeout)
+            choice = self.get_user_input_with_image_support(analyses)
 
             if choice and choice != 'auto' and choice != 'timeout':
                 print(f"[HUMAN SELECTED] Using human choice: {choice}")
@@ -3507,7 +3470,7 @@ You have {self.user_response_timeout} seconds to respond.
         self.enable_object_indexing = enable_indexing
         self.enable_dialogue_system = enable_dialogue
         self.confidence_gap_threshold = confidence_threshold
-        self.user_response_timeout = timeout
+        self.human_selection_timeout = timeout
         
         # Initialize object indexing if enabled
         if enable_indexing:
