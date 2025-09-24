@@ -24,6 +24,13 @@ moda_models=[
     "Qwen/Qwen2-VL-7B-Instruct"
 ]
 
+openai_models=[
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-4-turbo",
+    "gpt-3.5-turbo"
+]
+
 class VLMAPI:
     def __init__(self,model):#gpt-4o-2024-11-20,gpt-4o-mini
         self.model=model
@@ -36,7 +43,60 @@ class VLMAPI:
                     ):
         
         
-        if self.model in moda_models:
+        if self.model in openai_models:
+            # OpenAI API
+            retry_count = 0
+            while retry_count < retry_limit:
+                try:
+                    t1 = time.time()
+                    print(f"********* start call {self.model} *********")
+                    
+                    api_key = random.choice(api_keys)
+                    # 钱多多API平台配置
+                    client = OpenAI(
+                        api_key=api_key,
+                        base_url="https://api2.aigcbest.top/v1"  # 钱多多API端点
+                    )
+                    
+                    outputs = client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=0.9
+                    )
+                    
+                    content = outputs.choices[0].message.content
+                    
+                    # record
+                    current_time = int(datetime.now().timestamp())
+                    formatted_time = datetime.utcfromtimestamp(current_time).strftime("%Y/%m/%d/%H:%M:%S")
+                    data_dict = {
+                        "model": self.model,
+                        "messages": messages,
+                        "response": {
+                            "model": outputs.model,
+                            "content": content,
+                            "usage": str(outputs.usage),
+                            "choices": str(outputs.choices[0]),
+                            "created": outputs.created,
+                        },
+                        "current_time": formatted_time
+                    }
+                    save_path = f"./data/{self.model}/apiRecord.json"
+                    save_data_to_json(data_dict, save_path)
+                    
+                    t2 = time.time() - t1
+                    print("****** content: \n", content)
+                    print(f"********* end call {self.model}: {t2:.2f}*********")
+                    
+                    return content
+                    
+                except Exception as ex:
+                    print(f"Attempt call {self.model} {retry_count + 1} failed: {ex}")
+                    time.sleep(5)
+                    retry_count += 1
+                    
+        elif self.model in moda_models:
             
             retry_count = 0
             while retry_count < retry_limit: 
@@ -91,7 +151,13 @@ class VLMAPI:
                 
                 except Exception as ex:
                     print(f"Attempt call {self.model} {retry_count + 1} failed: {ex}")
-                    time.sleep(300)
+                    # Check if it's a 400 error (client error) - don't retry
+                    error_str = str(ex)
+                    if "400" in error_str or "invalid_parameter" in error_str.lower():
+                        print(f"Client error (400) - not retrying: {ex}")
+                        break
+                    # For other errors, use shorter sleep time
+                    time.sleep(3)  # 3 seconds instead of 300
                     retry_count += 1
             
             
@@ -153,7 +219,13 @@ class VLMAPI:
                     return content
                 except Exception as ex:
                     print(f"Attempt call {self.model} {retry_count + 1} failed: {ex}")
-                    time.sleep(300)
+                    # Check if it's a 400 error (client error) - don't retry
+                    error_str = str(ex)
+                    if "400" in error_str or "invalid_parameter" in error_str.lower():
+                        print(f"Client error (400) - not retrying: {ex}")
+                        break
+                    # For other errors, use shorter sleep time
+                    time.sleep(3)  # 3 seconds instead of 300
                     retry_count += 1
         
         return None

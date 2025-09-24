@@ -9,19 +9,7 @@ import os
 import time
 from ai2thor.controller import Controller
 from ai2thor.platform import CloudRendering
-
-try:
-    from web_ui import start_dashboard_server, log_task_start, log_task_complete, log_interaction
-    WEB_DASHBOARD_AVAILABLE = True
-    print("Web Dashboard is available")
-except ImportError as e:
-    WEB_DASHBOARD_AVAILABLE = False
-    print(f"Web Dashboard is not available: {e}")
-    def start_dashboard_server(*args, **kwargs): return None
-    def log_task_start(data): pass
-    def log_task_complete(success, data=None): pass 
-    def log_interaction(data): pass
-MODE = "LOCAL" # choose ["LOCAL","API"]
+MODE = "API" # choose ["LOCAL","API"]
 PLATFORM_TYPE="GPU" 
 
 MAX_MODEL_INFER_COUNT=3
@@ -35,19 +23,6 @@ def load_data(args):
                 cache[pre] = 1
     with open(args.input_path) as f:
         data = json.load(f)
-    
-    # 如果指定了task_ids，按数组索引加载这些任务
-    if hasattr(args, 'task_ids') and args.task_ids:
-        task_indices = [int(id.strip()) for id in args.task_ids.split(',')]
-        filtered_data = []
-        for idx in task_indices:
-            if 0 <= idx < len(data):
-                filtered_data.append(data[idx])
-            else:
-                print(f"--Warning: Task index {idx} out of range (0-{len(data)-1})")
-        data = filtered_data
-        print(f"--Loading tasks by array indices: {task_indices}")
-        print(f"--Found {len(data)} valid tasks")
     
     print(f"--total task count:{len(data)}")
     last_data = []
@@ -64,7 +39,6 @@ def load_data(args):
     return group_data[args.cur_count-1]
 
 def get_trajectory(controller, task, model, max_step=10, port=-1):
-    autogn = None  # 初始化为None，避免异常处理中的未定义错误
     try:
         scene = task["scene"]
         task_name = task["taskquery"]
@@ -78,16 +52,6 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
         
         print(f"******** Task Name: {task_name} *** Max Steps: {max_step} ********")
         print(f"******** Task Record: {save_path} ********")
-        
-        # 记录任务开始 - Web Dashboard
-        log_task_start({
-            'identity': index,
-            'taskquery': task_name,
-            'scene': scene,
-            'tasktype': tasktype,
-            'max_steps': max_step,
-            'save_path': save_path
-        })
         autogn = RocAgent(controller, save_path, scene, visibilityDistance=20, gridSize=0.1, fieldOfView=90, 
                             target_objects=task["target_objects"],
                             related_objects=task["related_objects"],
@@ -95,13 +59,6 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
                             taskid=task["identity"],
                             platform_type=PLATFORM_TYPE)
         print("RoctAgent Initialization successful!!!")
-        
-        # ENHANCEMENT (9.4): Set task context for improved VLM prompts
-        autogn.set_task_context(
-            task_description=task_name,
-            task_type=tasktype
-        )
-        
         objects = autogn.eventobject.get_objects_type(autogn.controller.last_event)
         action, pre_action = "init", "init"
         item, pre_item = None, None
@@ -130,8 +87,7 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
                         "images": []
                     }
                     trajectory.append(dic)
-                    # Don't stop the controller here as it's shared between tasks
-                    # autogn.controller.stop()
+                    autogn.controller.stop()
                     result_dir = autogn.result_dir
                     del autogn
                     return trajectory, messages, result_dir
@@ -275,21 +231,14 @@ def get_trajectory(controller, task, model, max_step=10, port=-1):
             "images": []
         }
         trajectory.append(dic)
-        # Don't stop the controller here as it's shared between tasks
-        # autogn.controller.stop()
+        autogn.controller.stop()
         del autogn
         return trajectory, messages, save_path
     except Exception as e:
         print(e)
-        if autogn is not None:
-            try:
-                # Don't stop the controller here as it's shared between tasks
-                # autogn.controller.stop()  # Commented out to fix multi-task testing
-                del autogn
-            except:
-                pass  # 如果清理失败，继续执行
+        autogn.controller.stop()
+        del autogn
         print(f"--task{task['identity']}Track acquisition failed -- emulator /api exception, end the current evaluation task!!!--")
-        return None, None, None
 
 def test(controller, test_data, model="Qwen2.5-VL-3B-Instruct", port=-1):
     save_path=f"./data/{model}/{test_data['identity']}_{test_data['tasktype']}_{test_data['scene']}_{test_data['instruction_idx']}"
@@ -317,11 +266,6 @@ def test(controller, test_data, model="Qwen2.5-VL-3B-Instruct", port=-1):
     metric_dic = metric(test_data, trajectory, key_actions)
     test_end_time = time.time()
     elapsed_time = int(test_end_time - test_start_time)
-    
-    # Extract success status from calculated metrics
-    task_success = metric_dic["success"] == 1
-    completeness = metric_dic["completeness"]
-    
     with open(f"{result_dir}/result.json","w") as f:
         f.write(json.dumps({
             "identity":test_data["identity"],
@@ -337,12 +281,7 @@ def test(controller, test_data, model="Qwen2.5-VL-3B-Instruct", port=-1):
             "time": elapsed_time,
             "maxstep": get_max_steps(test_data["tasktype"]),
         }, indent=4))
-    
-    # Use actual metrics instead of always printing success
-    if task_success:
-        print(f"""--task{test_data["identity"]}evaluate SUCCEEDED--- (completeness: {completeness:.2f})""")
-    else:
-        print(f"""--task{test_data["identity"]}evaluate FAILED--- (completeness: {completeness:.2f})""")
+    print(f"""--task{test_data["identity"]}evaluate successed---""")
 
 if __name__ == "__main__":
     
@@ -355,57 +294,9 @@ if __name__ == "__main__":
         parser.add_argument("--port", type=int, default=10000, help="")
         parser.add_argument("--cur_count", type=int, default=1, help="")
         parser.add_argument("--total_count", type=int, default=4, help="")
-        parser.add_argument("--task_ids", type=str, default=None, help="Comma-separated task indices to run")
-        parser.add_argument("--dashboard_port", type=int, default=8080, help="Web dashboard port")
-        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard")
         args = parser.parse_args()
         print(args)
         data = load_data(args)
-
-        # Initialize Web Dashboard for LOCAL mode
-        dashboard_thread = None
-        dialogue_enabled = False
-
-        # Check if dialogue system is enabled
-        try:
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'ai2thor_engine'))
-            from ai2thor_engine.RocAgent import RocAgent
-
-            # Check RocAgent default settings
-            dialogue_enabled = getattr(RocAgent, '_default_enable_dialogue_system', False)
-
-            # Fallback: check source code for dialogue system setting
-            if not dialogue_enabled:
-                try:
-                    import inspect
-                    source = inspect.getsource(RocAgent.__init__)
-                    if 'self.enable_dialogue_system = True' in source:
-                        dialogue_enabled = True
-                except:
-                    pass
-        except Exception as e:
-            print(f"Warning: Failed to check dialogue system status: {e}")
-            dialogue_enabled = False
-
-        # Launch Web Dashboard if conditions are met
-        if dialogue_enabled and not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
-            print(f"\n[INFO] Starting Web Dashboard on port {args.dashboard_port}...")
-            dashboard_thread = start_dashboard_server(port=args.dashboard_port, auto_open=False)
-            if dashboard_thread:
-                print(f"[INFO] Web Dashboard successfully started at: http://localhost:{args.dashboard_port}")
-                import time
-                time.sleep(2)  # Allow dashboard initialization
-            else:
-                print("[ERROR] Web Dashboard failed to start")
-        elif not dialogue_enabled:
-            print("[INFO] Dialogue system is disabled - Web Dashboard not started")
-        elif args.no_dashboard:
-            print("[INFO] Web Dashboard disabled via --no_dashboard flag")
-        elif not WEB_DASHBOARD_AVAILABLE:
-            print("[WARNING] Web Dashboard module not available for import")
-
         success_count = 0
         # controller = None
         controller = Controller(
@@ -418,41 +309,24 @@ if __name__ == "__main__":
             visibilityDistance=20,
             gridSize=0.1,
             renderDepthImage=False,
-            renderInstanceSegmentation=True,
+            renderInstanceSegmentation=False,
             width=800,
             height=450,
             fieldOfView=90,
         )
         for test_data in tqdm(data):
             try:
-                result_file = f"./data/{args.model_name}/{test_data['identity']}_{test_data['tasktype']}_{test_data['scene']}_{test_data['instruction_idx']}/result.json"
-                existed_before = os.path.exists(result_file)
-                
                 test(controller, test_data, args.model_name, args.port)
-                
-                # Check if task actually succeeded by reading the metrics from result.json
-                if os.path.exists(result_file) and not existed_before:
-                    try:
-                        with open(result_file, 'r') as f:
-                            result_data = json.load(f)
-                            # Use actual success metric instead of just file existence
-                            if result_data.get('metrics', {}).get('success', 0) == 1:
-                                success_count += 1
-                    except (json.JSONDecodeError, KeyError):
-                        # If we can't read metrics, fall back to file existence (backward compatibility)
-                        print(f"Warning: Could not read metrics from {result_file}, using file existence as success indicator")
-                        success_count += 1
+                success_count += 1
             except Exception as e:
                 print(e)
                 print(f"--task{test_data['identity']}failed, End the current evaluation task!!!--")
                 continue
         print(f"--The current process evaluation task end--total task count:{len(data)}successed task count:{success_count}")
-        # Stop controller after all tasks are completed
-        controller.stop()
     
     
     elif MODE=="API":
-        match_item_model="gpt-4o-mini"
+        match_item_model="gpt-4o-mini"  # Use the same model for consistency
         
         parser = argparse.ArgumentParser()
         parser.add_argument("--input_path", type=str, default="./data/test_809.json", help="input file path")
@@ -461,67 +335,9 @@ if __name__ == "__main__":
         parser.add_argument("--port", type=int, default=10000, help="")
         parser.add_argument("--cur_count", type=int, default=1, help="")
         parser.add_argument("--total_count", type=int, default=4, help="")
-        parser.add_argument("--task_ids", type=str, default=None, help="Comma-separated task array indices to run (e.g., '0,1,2' for first 3 tasks)")
-        parser.add_argument("--dashboard_port", type=int, default=8888, help="Web dashboard port")
-        parser.add_argument("--no_dashboard", action="store_true", help="Disable web dashboard (only applies to dialogue mode)")
         args = parser.parse_args()
         print(args)
-        
         data = load_data(args)
-        
-        # Launch Web Dashboard - Only for dialogue mode
-        dashboard_thread = None
-        
-        # Check if dialogue system is enabled
-        dialogue_enabled = False
-        try:
-            # We need to check the actual RocAgent class default value
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'ai2thor_engine'))
-            from ai2thor_engine.RocAgent import RocAgent
-            
-            # Create a temporary instance to check the default setting
-            # We can't instantiate fully without controller, so check class defaults
-            dialogue_enabled = getattr(RocAgent, '_default_enable_dialogue_system', False)
-            
-            # Fallback: create minimal instance to check instance defaults
-            if not dialogue_enabled:
-                try:
-                    # Check what the __init__ sets as default
-                    import inspect
-                    source = inspect.getsource(RocAgent.__init__)
-                    if 'self.enable_dialogue_system = True' in source:
-                        dialogue_enabled = True
-                except:
-                    pass
-        except:
-            dialogue_enabled = False
-        
-        # Only launch dashboard if dialogue system is enabled AND --no_dashboard not specified
-        if dialogue_enabled and not args.no_dashboard and WEB_DASHBOARD_AVAILABLE:
-            print(f"\nLaunching Web dashboard for dialogue mode...")
-            dashboard_thread = start_dashboard_server(port=args.dashboard_port, auto_open=True)
-            if dashboard_thread:
-                print(f"Web dashboard: http://localhost:{args.dashboard_port}")
-            else:
-                print("Web dashboard failed.")
-        elif not dialogue_enabled:
-            print("Dialogue system disabled - no dashboard needed")
-        elif args.no_dashboard:
-            print("Dashboard disabled by --no_dashboard flag")
-        
-        # If no tasks to run, keep dashboard running
-        if len(data) == 0:
-            print("No tasks to run, but keeping dashboard active for monitoring...")
-            if dashboard_thread:
-                try:
-                    import time
-                    time.sleep(5)  # Keep it running for a bit
-                    print(f"Dashboard is running at http://localhost:{args.dashboard_port}")
-                except KeyboardInterrupt:
-                    print("Dashboard stopped by user")
-            exit(0)
         success_count = 0
         
         controller = Controller(
@@ -534,7 +350,7 @@ if __name__ == "__main__":
             visibilityDistance=20,
             gridSize=0.1,
             renderDepthImage=False,
-            renderInstanceSegmentation=True,
+            renderInstanceSegmentation=False,
             width=800,
             height=450,
             fieldOfView=90,
@@ -542,30 +358,13 @@ if __name__ == "__main__":
         
         for test_data in tqdm(data):
             try:
-                result_file = f"./data/{args.model_name}/{test_data['identity']}_{test_data['tasktype']}_{test_data['scene']}_{test_data['instruction_idx']}/result.json"
-                existed_before = os.path.exists(result_file)
-                
                 test(controller, test_data, args.model_name, args.port)
-                
-                # Check if task actually succeeded by reading the metrics from result.json
-                if os.path.exists(result_file) and not existed_before:
-                    try:
-                        with open(result_file, 'r') as f:
-                            result_data = json.load(f)
-                            # Use actual success metric instead of just file existence
-                            if result_data.get('metrics', {}).get('success', 0) == 1:
-                                success_count += 1
-                    except (json.JSONDecodeError, KeyError):
-                        # If we can't read metrics, fall back to file existence (backward compatibility)
-                        print(f"Warning: Could not read metrics from {result_file}, using file existence as success indicator")
-                        success_count += 1
+                success_count += 1
             except Exception as e:
                 print(e)
                 print(f"--task{test_data['identity']}failed, End the current evaluation task!!!--")
                 continue
         print(f"--The current process evaluation task end--total task count:{len(data)}successed task count:{success_count}")
-        # Stop controller after all tasks are completed
-        controller.stop()
     
     # from concurrent.futures import ThreadPoolExecutor
     # from tqdm import tqdm

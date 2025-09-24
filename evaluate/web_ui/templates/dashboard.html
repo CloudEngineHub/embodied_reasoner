@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embodied Agent Monitor</title>
+    <link rel="icon" type="image/png" href="/static/images/embodied-reasoner-logo.png">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <img src="/static/images/embodied-reasoner-logo.png" alt="Embodied Reasoner Logo" class="logo">
+            <div class="header-text">
+                <h1>Embodied Reasoner Monitor</h1>
+                <p>Real-time monitoring of AI2-THOR tasks</p>
+            </div>
+        </div>
+    </div>
+   
+    <div class="status-bar">
+        <div class="status-card">
+            <h3>Current Task</h3>
+            <div class="value" id="current-task-name">Waiting...</div>
+            <div class="label" id="current-task-scene"></div>
+        </div>
+        <div class="status-card">
+            <h3>Task Progress</h3>
+            <div class="value" id="task-progress">0 / 0</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+        <div class="status-card">
+            <h3>Success Rate</h3>
+            <div class="value" id="success-rate">0%</div>
+            <div class="label">Completed Tasks</div>
+        </div>
+        <div class="status-card">
+            <h3>System Status</h3>
+            <div class="value" id="system-status">Ready</div>
+            <div class="label" id="connection-status">WebSocket: Connecting...</div>
+        </div>
+    </div>
+   
+    <div class="main-content">
+        <div class="panel">
+            <h2>Task History</h2>
+            <div class="task-history" id="task-history">
+                <div style="text-align: center; color: #7f8c8d; padding: 20px;">
+                    No task history available
+                </div>
+            </div>
+        </div>
+       
+        <div class="panel">
+            <h2>Real-time Interaction Log</h2>
+            <div class="interaction-log" id="interaction-log">
+                <div style="text-align: center; color: #7f8c8d; padding: 20px;">
+                    Waiting for interaction data...
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Disambiguation History</h2>
+            <div class="disambiguation-history" id="disambiguation-history">
+                <div style="text-align: center; color: #7f8c8d; padding: 20px;">
+                    No disambiguation history available
+                </div>
+            </div>
+        </div>
+    </div>
+   
+    <div class="disambiguation-panel hidden" id="disambiguation-panel">
+        <h2>Multi-Object Disambiguation</h2>
+        <p id="disambiguation-task">Please select the most suitable object from the candidates below:</p>
+        <div class="candidate-grid" id="candidate-grid">
+        </div>
+    </div>
+   
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

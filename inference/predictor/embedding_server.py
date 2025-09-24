@@ -5,7 +5,7 @@ import numpy as np
 
 class EmbeddingServer:
     def __init__(self, model_path="BAAI/bge-small-en-v1.5"):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
         self.model = FlagAutoModel.from_finetuned(
                                     model_path,
                                     query_instruction_for_retrieval="Represent this sentence for searching relevant passages:",
