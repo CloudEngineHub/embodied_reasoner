@@ -1,5 +1,20 @@
 # Evaluation Framework
 
+## Table of Contents
+
+- [Structure](#structure)
+- [Core Components](#core-components)
+  - [AI2-THOR Engine](#1-ai2-thor-engine-ai2thor_engine)
+  - [Evaluation System](#2-evaluation-system)
+  - [Web Dashboard](#3-web-dashboard-web_ui)
+  - [Prompts and Configuration](#4-prompts-and-configuration)
+  - [Data Management](#5-data-management-data)
+- [LOCAL Mode Setup](#local-mode-setup)
+- [Configuration](#configuration)
+- [Testing Examples](#testing-examples)
+- [Troubleshooting](#troubleshooting)
+- [Log Examples](#log-examples)
+
 ## Structure
 
 ```
@@ -34,13 +49,22 @@ The core agent implementation module that handles navigation and interaction wit
 
 #### `RocAgent.py`
 
-**Three-Mode Disambiguation System**
+The agent supports **4 navigation modes** for handling multiple similar objects:
 
-The agent supports three distinct disambiguation modes for handling multiple similar objects:
+1. **Original Mode (No optimization)**: Standard navigation without enhanced disambiguation
+   - Enable: Set `enable_dialogue_system = False` ([line 105](../ai2thor_engine/RocAgent.py#L105))
 
-  - **`human_first_vlm_fallback`**: Prioritizes human decision-making with timeouts, falling back to VLM-based selection.
-  - **`vlm_first_human_choice`**: VLM performs analysis and provides recommendations (confidence scores), with human making the final selection.
-  - **`human_only_random_fallback`**: Pure human control with random selection as fallback mechanism.
+2. **Human-First VLM Fallback Mode** (Optimized): Prioritizes human decision-making with timeouts, falling back to VLM-based selection
+   - Enable: Set `enable_dialogue_system = True` ([line 105](../ai2thor_engine/RocAgent.py#L105))
+   - Set `disambiguation_mode = "human_first_vlm_fallback"` ([line 112](../ai2thor_engine/RocAgent.py#L112))
+
+3. **VLM-First Human Choice Mode** (Optimized): VLM performs analysis and provides recommendations (confidence scores), with human making the final selection
+   - Enable: Set `enable_dialogue_system = True` ([line 105](../ai2thor_engine/RocAgent.py#L105))
+   - Set `disambiguation_mode = "vlm_first_human_choice"` ([line 112](../ai2thor_engine/RocAgent.py#L112))
+
+4. **Human-Only Random Fallback Mode** (Optimized): Pure human control with random selection as fallback mechanism
+   - Enable: Set `enable_dialogue_system = True` ([line 105](../ai2thor_engine/RocAgent.py#L105))
+   - Set `disambiguation_mode = "human_only_random_fallback"` ([line 112](../ai2thor_engine/RocAgent.py#L112))
 
 **Enhanced Multi-object Disambiguation**
 
