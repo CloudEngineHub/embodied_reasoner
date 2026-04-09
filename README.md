@@ -49,7 +49,9 @@ https://github.com/user-attachments/assets/da9c5b42-ab8e-4101-9ec0-a226590d23fc
 
 
 ## News 🔥🔥
-
+- **2026.04:** Embodied-Reasoner Accepted by ACL 2026 Main
+- **2026.01:** Invited Talk@视觉语言导航 https://www.bilibili.com/video/BV149cjz5Es5/?spm_id_from=333.337.search-card.all.click&vd_source=818fc4816fcb6a1d8c82455cd7851b48
+- **2025.05:** Invited Talk@智猩猩 https://www.bilibili.com/video/BV1Cs7Hz4ETk?spm_id_from=333.788.videopod.sections&vd_source=818fc4816fcb6a1d8c82455cd7851b48
 - **2025.03:** We release our paper and dataset.
 
 ## Contents 🌳🌳
