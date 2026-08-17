@@ -300,11 +300,35 @@ Please refer to `data_endine/README.md` for checking the details about the data 
 If you find our work helpful, feel free to give us a cite.
 
 ```
-@article{embodied-reasoner,
-    title   = {Embodied-Reasoner: Synergizing Visual Search, Reasoning, and Action for Embodied Interactive Tasks}, 
-    author  = {Wenqi Zhang and Mengna Wang and Gangao Liu and Huixin Xu and Yiwei Jiang and Yongliang Shen and Guiyang Hou and Zhe Zheng and Hang Zhang and Xin Li and Weiming Lu and Peng Li and Yueting Zhuang},
-    journal = {arXiv preprint arXiv:2503.21696},
-    year    = {2025}
+@inproceedings{zhang-etal-2026-embodied,
+    title = "Embodied-Reasoner: Synergizing Visual Search, Reasoning, and Action for Embodied Interactive Tasks",
+    author = "Zhang, Wenqi  and
+      Wang, Mengna  and
+      Liu, Gangao  and
+      Xu, Huixin  and
+      Jiang, Yiwei  and
+      Shen, Yongliang  and
+      Hou, Guiyang  and
+      Zheng, Zhe  and
+      Zhang, Hang  and
+      Li, Xin  and
+      Liu, Jiajun  and
+      Lu, Weiming  and
+      Li, Peng  and
+      Zhuang, Yueting",
+    editor = "Liakata, Maria  and
+      Moreira, Viviane P.  and
+      Zhang, Jiajun  and
+      Jurgens, David",
+    booktitle = "Proceedings of the 64th Annual Meeting of the {A}ssociation for {C}omputational {L}inguistics (Volume 1: Long Papers)",
+    month = jul,
+    year = "2026",
+    address = "San Diego, California, United States",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2026.acl-long.1910/",
+    doi = "10.18653/v1/2026.acl-long.1910",
+    pages = "41178--41207",
+    ISBN = "979-8-89176-390-6"
 }
 
 ```
