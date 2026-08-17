@@ -49,10 +49,6 @@ Embodied-Reasoner:
       Lu, Weiming  and
       Li, Peng  and
       Zhuang, Yueting",
-    editor = "Liakata, Maria  and
-      Moreira, Viviane P.  and
-      Zhang, Jiajun  and
-      Jurgens, David",
     booktitle = "Proceedings of the 64th Annual Meeting of the {A}ssociation for {C}omputational {L}inguistics (Volume 1: Long Papers)",
     month = jul,
     year = "2026",
