@@ -1,0 +1,1122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Project page for Embodied-Navigator: Point, Think, Memorize, and Align for Efficient Embodied Navigation.">
+  <meta name="theme-color" content="#fbfcfa">
+  <title>Embodied-Navigator: Point, Think, Memorize, and Align for Efficient Embodied Navigation</title>
+  <link rel="stylesheet" href="assets/site.css">
+  <script defer src="assets/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-site-header>
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a class="site-mark" href="#top" aria-label="Embodied-Navigator, top of page">
+        <img
+          class="site-mark-image"
+          src="img/omniai-logo.png"
+          alt=""
+          width="30"
+          height="30"
+          aria-hidden="true"
+        >
+        <span>Embodied-Navigator</span>
+      </a>
+      <div class="nav-links">
+        <a href="#abstract">Abstract</a>
+        <a href="#method">Method</a>
+        <a href="#results">Results</a>
+        <a href="#analysis">Analysis</a>
+        <a href="#qualitative">Qualitative</a>
+        <a href="#bibtex">BibTeX</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ===================== Title block ===================== -->
+    <section class="masthead" id="top" aria-labelledby="page-title">
+      <div class="masthead-copy page-width">
+
+        <h1 id="page-title">
+          <span class="title-mark">Embodied-Navigator</span><span class="title-colon">:</span>
+          <span class="title-rest">Point, Think, Memorize, and Align for Efficient Embodied Navigation</span>
+        </h1>
+
+        <p class="authors">
+          Hongyan Feng<sup>1</sup>,
+          Sunlai Chen<sup>1</sup>,
+          Xuanyu Liu<sup>1</sup>,
+          Miao Pan<sup>1</sup>,
+          Yangfan Xie<sup>1</sup>,
+          Yuxiang Cui<sup>1</sup>,
+          Zhongxiang Zhou<sup>1</sup>,
+          Rong Xiong<sup>1</sup>,
+          Wenqi Zhang<sup>1</sup>,
+          Jianwei Yin<sup>1</sup>,
+          Yueting Zhuang<sup>1</sup>,
+          Xuhong Zhang<sup>1</sup>
+        </p>
+        <p class="affiliations"><sup>1</sup>Zhejiang University</p>
+
+        <ul class="resource-links" aria-label="Project resources">
+          <li>
+            <a
+              class="resource-link"
+              href="https://arxiv.org/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                class="resource-symbol-icon"
+                src="img/icons/file-text.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+              >
+              arXiv
+            </a>
+          </li>
+          <li>
+            <a class="resource-link" href="#artifact">
+              <img
+                class="resource-symbol-icon"
+                src="img/icons/github.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+              >
+              Code
+            </a>
+          </li>
+          <li>
+            <a
+              class="resource-link"
+              href="https://huggingface.co/UnderTides/Embodied-Navigator-7B-GRPO"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                class="resource-brand-icon"
+                src="img/huggingface-logo.svg"
+                alt=""
+                width="95"
+                height="88"
+                aria-hidden="true"
+              >
+              Hugging Face
+            </a>
+          </li>
+          <li>
+            <a class="resource-link" href="#bibtex">
+              <img
+                class="resource-symbol-icon"
+                src="img/icons/quote.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+              >
+              BibTeX
+            </a>
+          </li>
+        </ul>
+      </div>
+
+      <figure class="overview-video page-wide">
+        <video
+          controls
+          playsinline
+          preload="none"
+          poster="img/introduction-poster.jpg"
+          width="960"
+          height="544"
+          aria-label="Embodied-Navigator overview of model architecture and experimental results"
+        >
+          <source src="img/Introduction.mp4" type="video/mp4">
+          Your browser does not support the video element.
+        </video>
+        <figcaption>
+          <span class="fig-label">Embodied-Navigator Overview: Model Architecture and Experimental Results</span>
+        </figcaption>
+      </figure>
+
+      <figure class="teaser page-wide">
+        <button
+          class="figure-button"
+          type="button"
+          data-lightbox="img/architecture.png"
+          data-caption="Figure 1. Embodied-Navigator combines multi-view RGB observations, language instructions, Anchor-Trajectory Memory, selective reasoning, visual waypoint prediction, and 2D-to-3D execution."
+          aria-label="Open Figure 1, the Embodied-Navigator architecture, at full size"
+          title="Open full-size figure"
+        >
+          <img
+            src="img/architecture.png"
+            alt="Embodied-Navigator architecture showing memory, instruction and multi-view inputs, selective reasoning, pixel action prediction, and 2D-to-3D execution"
+            width="1649"
+            height="656"
+            fetchpriority="high"
+          >
+          <span class="zoom-mark" aria-hidden="true">+</span>
+        </button>
+        <figcaption>
+          <span class="fig-label">Figure 1.</span>
+          Overview of Embodied-Navigator. The policy reasons at critical nodes, predicts a view and a
+          2D pixel waypoint, and delegates metric execution to a low-level controller.
+          Depth is used only after prediction, for geometric projection.
+        </figcaption>
+      </figure>
+
+      <dl class="metric-strip" aria-label="Headline results">
+        <div class="metric">
+          <dt>R2R-CE SR</dt>
+          <dd>66.2%</dd>
+        </div>
+        <div class="metric">
+          <dt>RxR-CE SR</dt>
+          <dd>65.7%</dd>
+        </div>
+        <div class="metric">
+          <dt>Reasoning ratio</dt>
+          <dd>26.3%</dd>
+        </div>
+        <div class="metric">
+          <dt>Real-world SR</dt>
+          <dd>60.0%</dd>
+        </div>
+      </dl>
+    </section>
+
+    <!-- ===================== 1. Abstract ===================== -->
+    <section class="section" id="abstract" aria-labelledby="abstract-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">1</p>
+          <h2 id="abstract-title">Abstract</h2>
+        </div>
+
+        <div class="abstract-body">
+          <p>
+            Although Large Vision-Language Models (VLMs) have significantly advanced
+            embodied navigation, their direct deployment remains challenging, as existing
+            methods often force VLMs into unnatural action spaces that misalign with their
+            2D pre-training priors, compounded by rigid reasoning schedules and inefficient
+            memory management. To overcome these limitations, we propose <strong>Embodied-Navigator</strong>,
+            a unified framework for efficient embodied navigation.
+          </p>
+          <p>
+            First, we introduce a <strong>Pixel-to-3D Action Formulation</strong> (<em>Point</em>)
+            that, for the first time, treats pixel pointing as a natural bridge for smoothly
+            transferring visual-grounding capabilities acquired during VLM pre-training to VLN.
+            Specifically, the VLM selects 2D pixels, which are then projected into 3D coordinates
+            for a low-level SLAM controller. Second, we propose an integrated
+            <strong>Selective Reasoning and Anchor-Trajectory Memory</strong> mechanism
+            (<em>Think</em> and <em>Memorize</em>), which dynamically triggers Chain-of-Thought and
+            retains high-fidelity memory only at critical nodes, compressing redundant
+            trajectories into lightweight <strong>Space-Time Indicators</strong>, thereby
+            preserving critical historical information and enhancing spatio-temporal perception.
+          </p>
+          <p>
+            Finally, we design an efficient <strong>Two-Level Reinforcement Learning Alignment
+            Paradigm</strong> (<em>Align</em>) based on Group Relative Policy Optimization (GRPO).
+            By superimposing global outcome rewards with fine-grained process rewards, this dense
+            supervision tightly aligns the agent's cognitive planning with physical environmental
+            feedback, endowing the model with adaptive reasoning capabilities. Experiments
+            demonstrate that Embodied-Navigator achieves state-of-the-art performance (e.g., 66.2% SR on
+            R2R-CE) with high runtime and sample efficiency (requiring only 90k training
+            trajectories).
+          </p>
+        </div>
+
+        <p class="contribution">
+          <strong>One-sentence contribution.</strong> Embodied-Navigator aligns where a VLM points,
+          when it thinks, what it remembers, and how reinforcement learning credits its decisions.
+        </p>
+
+        <p class="contribution-note">
+          <strong>Note on system architecture.</strong> Embodied-Navigator is a complete navigation
+          system. While the VLM observes RGB only, the full pipeline uses depth for
+          pixel-to-3D projection and odometry for Space-Time Indicator encoding. The policy
+          is trained on MultiNav-CoT, a 90k-trajectory dataset with Gemini 2.5 Flash–generated
+          Chain-of-Thought annotations. The Two-Level GRPO rewards rely on simulator signals
+          (geodesic distance, oracle success, SPL) that may not transfer directly to
+          unstructured real-world data without adaptation.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================== 2. Method ===================== -->
+    <section class="section section-alt" id="method" aria-labelledby="method-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">2</p>
+          <h2 id="method-title">Method</h2>
+          <p class="section-summary">
+            Four aligned components connect high-level visual reasoning to efficient
+            long-horizon execution.
+          </p>
+        </div>
+
+        <div class="component-grid">
+          <article class="component component-point">
+            <p class="component-letter">P</p>
+            <h3>Point</h3>
+            <p>
+              Treat pixel pointing as a bridge from VLM pre-training to VLN: select one of
+              four RGB views and a 2D waypoint, then use depth only afterward for 3D
+              projection and SLAM execution.
+            </p>
+            <p class="component-effect">
+              First to smoothly transfer pretrained grounding into VLN through pixel pointing.
+            </p>
+          </article>
+          <article class="component component-think">
+            <p class="component-letter">T</p>
+            <h3>Think</h3>
+            <p>
+              Trigger explicit Chain-of-Thought at difficult topological nodes instead of
+              reasoning densely or at fixed intervals.
+            </p>
+            <p class="component-effect">Allocates computation to consequential decisions.</p>
+          </article>
+          <article class="component component-memory">
+            <p class="component-letter">M</p>
+            <h3>Memorize</h3>
+            <p>
+              Retain critical states as visual-reasoning anchors and encode routine motion
+              with lightweight Space-Time Indicators.
+            </p>
+            <p class="component-effect">Preserves topology without storing every frame.</p>
+          </article>
+          <article class="component component-align">
+            <p class="component-letter">A</p>
+            <h3>Align</h3>
+            <p>
+              Optimize the policy through reinforcement learning with Two-Level GRPO,
+              superimposing local action and global trajectory advantages across multi-branch
+              rollouts.
+            </p>
+            <p class="component-effect">
+              Assigns credit from immediate decisions to final navigation success.
+            </p>
+          </article>
+        </div>
+      </div>
+
+      <div class="page-wide method-figure">
+        <figure>
+          <button
+            class="figure-button"
+            type="button"
+            data-lightbox="img/two_level_grpo.png"
+            data-caption="Figure 2. Two-Level GRPO explores candidate actions inside complete navigation rollouts and combines local process feedback with global trajectory outcomes."
+            aria-label="Open Figure 2, the Two-Level GRPO diagram, at full size"
+            title="Open full-size figure"
+          >
+            <img
+              src="img/two_level_grpo.png"
+              alt="Two-Level GRPO diagram with candidate actions, trajectory rollouts, local rewards and global rewards"
+              width="2249"
+              height="816"
+              loading="lazy"
+            >
+            <span class="zoom-mark" aria-hidden="true">+</span>
+          </button>
+          <figcaption>
+            <span class="fig-label">Figure 2.</span>
+            Two-Level GRPO explores multiple candidate actions per step and multiple
+            complete trajectories per instruction, then superimposes the two advantages.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="page-width reward-grid" aria-label="Two-Level GRPO reward structure">
+        <div>
+          <p class="reward-kicker">Local process feedback</p>
+          <h3>Which decision works here?</h3>
+          <p>
+            Target approach, collision avoidance, stop correctness, reasoning value, and
+            output validity provide dense feedback at each state.
+          </p>
+        </div>
+        <div>
+          <p class="reward-kicker">Global outcome feedback</p>
+          <h3>Did the full plan work?</h3>
+          <p>
+            Task success, path efficiency, and reasoning density evaluate complete
+            trajectories and discourage unnecessary computation.
+          </p>
+        </div>
+      </div>
+
+      <div class="page-width">
+        <p class="section-note">
+          Over 800 training steps, trajectory-level rewards alone converge at a success
+          reward of <strong>0.59</strong>. Superimposing local step advantages lifts this to
+          <strong>0.64</strong>, and adding annealed guided sampling reaches
+          <strong>0.68</strong> with faster convergence.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================== 3. Results ===================== -->
+    <section class="section" id="results" aria-labelledby="results-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">3</p>
+          <h2 id="results-title">Main Results</h2>
+          <p class="section-summary">
+            Embodied-Navigator reports the strongest results among the compared RGB-based
+            navigators on both validation-unseen benchmarks.
+          </p>
+        </div>
+
+        <p class="setup-note">
+          <strong>Setup.</strong> Qwen2.5-VL-7B base model, SFT cold start on MultiNav-CoT
+          (90k trajectories with Gemini 2.5 Flash–generated Chain-of-Thought annotations)
+          followed by Two-Level GRPO, a 4,096-token context window, and NVIDIA A800 GPUs for
+          training, evaluation, and deployment. Metrics are Navigation Error (NE), Oracle
+          Success (OS), Success Rate (SR), Success weighted by Path Length (SPL), and
+          normalized Dynamic Time Warping (nDTW). <strong>Sensor modalities:</strong> The VLM
+          observes RGB only; the full system uses depth for pixel-to-3D projection and
+          odometry for STI encoding. Compared methods vary in their use of panoramic views,
+          depth input to the VLM, and odometry; Embodied-Navigator uses four 90° RGB views (360° coverage),
+          depth for post-prediction projection, and odometry for memory encoding.
+        </p>
+
+        <div class="table-grid">
+          <div class="table-block">
+            <p class="table-caption">
+              <span class="tab-label">Table 1.</span>
+              R2R-CE val-unseen. NE in meters (lower is better); OS, SR, SPL in percent
+              (higher is better). All listed methods observe RGB only, without odometry or
+              depth input.
+            </p>
+            <div class="table-scroll" tabindex="0">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Method</th>
+                    <th scope="col">NE&nbsp;&darr;</th>
+                    <th scope="col">OS&nbsp;&uarr;</th>
+                    <th scope="col">SR&nbsp;&uarr;</th>
+                    <th scope="col">SPL&nbsp;&uarr;</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><th scope="row">StreamVLN</th><td>4.98</td><td>64.2</td><td>56.9</td><td>51.9</td></tr>
+                  <tr><th scope="row">NavFoM</th><td>4.61</td><td>72.1</td><td>61.7</td><td>55.3</td></tr>
+                  <tr><th scope="row">DualVLN</th><td>4.05</td><td>70.7</td><td>64.3</td><td>58.5</td></tr>
+                  <tr class="baseline-ours"><th scope="row">Embodied-Navigator (SFT only)</th><td>4.88</td><td>62.0</td><td>55.7</td><td>50.3</td></tr>
+                  <tr class="ours"><th scope="row">Embodied-Navigator</th><td>3.85</td><td>74.5</td><td>66.2</td><td>58.8</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="table-block">
+            <p class="table-caption">
+              <span class="tab-label">Table 2.</span>
+              RxR-CE val-unseen. NE in meters (lower is better); SR, SPL, nDTW in percent
+              (higher is better). All listed methods observe RGB only, without odometry or
+              depth input.
+            </p>
+            <div class="table-scroll" tabindex="0">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Method</th>
+                    <th scope="col">NE&nbsp;&darr;</th>
+                    <th scope="col">SR&nbsp;&uarr;</th>
+                    <th scope="col">SPL&nbsp;&uarr;</th>
+                    <th scope="col">nDTW&nbsp;&uarr;</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><th scope="row">StreamVLN</th><td>6.22</td><td>52.9</td><td>46.0</td><td>61.9</td></tr>
+                  <tr><th scope="row">NavFoM</th><td>4.74</td><td>64.4</td><td>56.2</td><td>65.8</td></tr>
+                  <tr><th scope="row">DualVLN</th><td>4.58</td><td>61.4</td><td>51.8</td><td>70.0</td></tr>
+                  <tr class="baseline-ours"><th scope="row">Embodied-Navigator (SFT only)</th><td>6.10</td><td>52.4</td><td>46.2</td><td>62.1</td></tr>
+                  <tr class="ours"><th scope="row">Embodied-Navigator</th><td>4.32</td><td>65.7</td><td>56.9</td><td>72.4</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="result-callout">
+          <p class="result-callout-value">+10.5 pp</p>
+          <p>
+            R2R-CE success improves from the SFT-only initialization at <strong>55.7%</strong>
+            to <strong>66.2%</strong> with the full framework, isolating the contribution of
+            Two-Level GRPO alignment. The combined system integrates Pixel-to-3D projection,
+            selective reasoning, Anchor-Trajectory Memory, and the MultiNav-CoT dataset;
+            matched-budget component ablations are reported in Section 4 below.
+          </p>
+        </div>
+
+        <p class="table-note">
+          Values are reported in the manuscript. Depth supports post-prediction
+          projection but is not an input to the VLM.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================== 4. Analysis ===================== -->
+    <section class="section section-alt" id="analysis" aria-labelledby="analysis-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">4</p>
+          <h2 id="analysis-title">Analysis and Ablations</h2>
+          <p class="section-summary">
+            Three complementary views show where cognition is spent, whether memory
+            survives long trajectories, and how hierarchical RL improves optimization.
+          </p>
+        </div>
+      </div>
+
+      <div class="page-wide analysis-figure">
+        <figure class="analysis-triptych">
+          <div class="analysis-chart-grid">
+            <div class="analysis-chart">
+              <p class="analysis-chart-label"><span>(a) Think</span> Reasoning allocation</p>
+              <button
+                class="figure-button"
+                type="button"
+                data-lightbox="img/reasoning_trigger_heatmap.png"
+                data-caption="Figure 3a. Spatial density of CoT triggers for the SFT policy (left) and the RL-aligned policy (right)."
+                aria-label="Open Figure 3a, the reasoning-trigger heatmaps, at full size"
+                title="Open full-size figure"
+              >
+                <img
+                  src="img/reasoning_trigger_heatmap.png"
+                  alt="Spatial heatmaps comparing diffuse SFT reasoning triggers on the left with selective RL-aligned triggers on the right"
+                  width="1980"
+                  height="716"
+                  loading="lazy"
+                >
+                <span class="zoom-mark" aria-hidden="true">+</span>
+              </button>
+            </div>
+
+            <div class="analysis-chart">
+              <p class="analysis-chart-label"><span>(b) Memorize</span> Long-horizon retention</p>
+              <button
+                class="figure-button"
+                type="button"
+                data-lightbox="img/long_horizon_performance.png"
+                data-caption="Figure 3b. Success rate by expert-path length, with the long-horizon evaluation distribution shown as bars."
+                aria-label="Open Figure 3b, long-horizon success rates by path length, at full size"
+                title="Open full-size figure"
+              >
+                <img
+                  src="img/long_horizon_performance.png"
+                  alt="Long-horizon success-rate curves showing Embodied-Navigator and memory ablations across forward-action count bins"
+                  width="1600"
+                  height="800"
+                  loading="lazy"
+                >
+                <span class="zoom-mark" aria-hidden="true">+</span>
+              </button>
+            </div>
+
+            <div class="analysis-chart">
+              <p class="analysis-chart-label"><span>(c) Align</span> RL learning dynamics</p>
+              <button
+                class="figure-button"
+                type="button"
+                data-lightbox="img/grpo_learning_curves.png"
+                data-caption="Figure 3c. Success-reward learning curves for trajectory-only GRPO and the two Two-Level GRPO variants."
+                aria-label="Open Figure 3c, the Two-Level GRPO learning curves, at full size"
+                title="Open full-size figure"
+              >
+                <img
+                  src="img/grpo_learning_curves.png"
+                  alt="Learning curves comparing Two-Level GRPO, trajectory-only GRPO, and Two-Level GRPO without guided sampling"
+                  width="2200"
+                  height="1100"
+                  loading="lazy"
+                >
+                <span class="zoom-mark" aria-hidden="true">+</span>
+              </button>
+            </div>
+          </div>
+
+          <figcaption>
+            <span class="fig-label">Figure 3.</span>
+            Complementary evidence for adaptive cognition, long-horizon memory, and RL
+            alignment. (a) RL shifts CoT triggers from diffuse corridor coverage toward
+            decision-relevant topological nodes. (b) Embodied-Navigator maintains the strongest
+            success rate as paths lengthen, while removing Space-Time Indicators weakens
+            the margin. (c) Local step advantages and annealed guided sampling learn faster
+            and reach higher reward than trajectory-only GRPO.
+          </figcaption>
+        </figure>
+      </div>
+
+      <div class="page-width analysis-grid">
+        <article class="analysis-block">
+          <p class="analysis-label">Selective reasoning</p>
+          <h3>Near-dense performance at one quarter of the reasoning rate</h3>
+          <p class="table-caption">
+            <span class="tab-label">Table 3.</span>
+            Reasoning trigger strategies on R2R-CE val-unseen.
+          </p>
+          <div class="table-scroll compact-table" tabindex="0">
+            <table>
+              <thead>
+                <tr><th scope="col">Trigger</th><th scope="col">CoT ratio</th><th scope="col">SR&nbsp;&uarr;</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">Dense CoT</th><td>100.0%</td><td>66.8%</td></tr>
+                <tr><th scope="row">Fixed interval (1/3)</th><td>36.2%</td><td>60.1%</td></tr>
+                <tr class="ours"><th scope="row">Adaptive (ours)</th><td>26.3%</td><td>66.2%</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="block-note">
+            Panel (a) provides the spatial evidence: the share of reasoning assigned to
+            straight corridors falls from 38% after SFT to 11% after RL alignment.
+          </p>
+        </article>
+
+        <article class="analysis-block">
+          <p class="analysis-label">Long-horizon memory</p>
+          <h3>Anchor-Trajectory Memory preserves extended navigation context</h3>
+          <p class="table-caption">
+            <span class="tab-label">Table 4.</span>
+            Baselines and memory variants on the long-horizon subset: 5,927 R2R-CE and
+            RxR-CE val-unseen trajectories whose expert path exceeds 12.5 meters, over 50
+            atomic forward actions.
+          </p>
+          <div class="table-scroll compact-table" tabindex="0">
+            <table>
+              <thead>
+                <tr><th scope="col">Model</th><th scope="col">Long-horizon SR&nbsp;&uarr;</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">StreamVLN</th><td>30.9</td></tr>
+                <tr><th scope="row">DualVLN</th><td>41.9</td></tr>
+                <tr><th scope="row">Embodied-Navigator (uniform sampling)</th><td>40.5</td></tr>
+                <tr><th scope="row">Embodied-Navigator (full history)</th><td>42.4</td></tr>
+                <tr><th scope="row">Embodied-Navigator (w/o STI)</th><td>45.6</td></tr>
+                <tr class="ours"><th scope="row">Embodied-Navigator (AT-Mem)</th><td>49.8</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="block-note">
+            Panel (b) shows that the advantage persists across trajectory-length bins.
+            Anchor-Trajectory Memory avoids the information loss of uniform sampling and
+            the attention dilution of full history; removing Space-Time Indicators alone
+            costs 4.2 points in aggregate SR.
+          </p>
+        </article>
+      </div>
+
+      <div class="page-wide review-evidence" aria-labelledby="review-evidence-title">
+        <div class="review-evidence-head">
+          <p class="analysis-label">Controlled attribution</p>
+          <h3 id="review-evidence-title">Isolating each contribution under a shared budget</h3>
+          <p>
+            Every comparison below uses the same Qwen2.5-VL-7B policy, sensing inputs,
+            validation-unseen splits, fixed non-learned SLAM controller, and evaluation
+            protocol. Each block changes only the named component, so differences are
+            conditional marginal contributions rather than additive gains.
+          </p>
+        </div>
+
+        <div class="review-table-block">
+          <p class="table-caption">
+            <span class="tab-label">Table 5.</span>
+            Matched-budget component ablations. The Action block is SFT-only and uses the
+            same 90k trajectories, approximately 700k interactions, and one training epoch;
+            all other blocks evaluate the corresponding trained navigation policies.
+          </p>
+          <p class="mobile-scroll-hint">Swipe horizontally to inspect all metrics&nbsp;&rarr;</p>
+          <div class="table-scroll detailed-table" tabindex="0">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col" rowspan="2">Block</th>
+                  <th class="variant-header" scope="col" rowspan="2">Variant</th>
+                  <th class="metric-group" scope="colgroup" colspan="4">R2R-CE val-unseen</th>
+                  <th class="metric-group" scope="colgroup" colspan="4">RxR-CE val-unseen</th>
+                </tr>
+                <tr>
+                  <th scope="col">NE&nbsp;&darr;</th>
+                  <th scope="col">OS&nbsp;&uarr;</th>
+                  <th scope="col">SR&nbsp;&uarr;</th>
+                  <th scope="col">SPL&nbsp;&uarr;</th>
+                  <th scope="col">NE&nbsp;&darr;</th>
+                  <th scope="col">SR&nbsp;&uarr;</th>
+                  <th scope="col">SPL&nbsp;&uarr;</th>
+                  <th scope="col">nDTW&nbsp;&uarr;</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th class="block-name" scope="rowgroup" rowspan="2">Action<br><span>SFT only</span></th>
+                  <th scope="row">NavFoM-style metric waypoint</th>
+                  <td>7.18</td><td>42.0</td><td>30.9</td><td>24.7</td>
+                  <td>8.47</td><td>27.2</td><td>20.6</td><td>43.1</td>
+                </tr>
+                <tr class="ours">
+                  <th scope="row">Pixel-to-3D</th>
+                  <td>4.88</td><td>62.0</td><td>55.7</td><td>50.3</td>
+                  <td>6.10</td><td>52.4</td><td>46.2</td><td>62.1</td>
+                </tr>
+                <tr class="group-start">
+                  <th class="block-name" scope="rowgroup" rowspan="3">GRPO</th>
+                  <th scope="row">Global trajectory advantage only</th>
+                  <td>4.52</td><td>67.0</td><td>59.3</td><td>52.1</td>
+                  <td>5.30</td><td>58.4</td><td>49.7</td><td>65.5</td>
+                </tr>
+                <tr>
+                  <th scope="row">Two-Level without annealed guidance</th>
+                  <td>4.12</td><td>71.5</td><td>63.4</td><td>56.0</td>
+                  <td>4.72</td><td>62.6</td><td>53.8</td><td>69.4</td>
+                </tr>
+                <tr class="ours">
+                  <th scope="row">Full Two-Level GRPO</th>
+                  <td>3.85</td><td>74.5</td><td>66.2</td><td>58.8</td>
+                  <td>4.32</td><td>65.7</td><td>56.9</td><td>72.4</td>
+                </tr>
+                <tr class="group-start">
+                  <th class="block-name" scope="rowgroup" rowspan="4">Memory</th>
+                  <th scope="row">Uniform sampling</th>
+                  <td>4.43</td><td>68.2</td><td>60.8</td><td>53.6</td>
+                  <td>5.03</td><td>59.4</td><td>50.8</td><td>66.8</td>
+                </tr>
+                <tr>
+                  <th scope="row">Full history</th>
+                  <td>4.29</td><td>69.4</td><td>61.9</td><td>54.7</td>
+                  <td>4.87</td><td>61.1</td><td>51.8</td><td>68.0</td>
+                </tr>
+                <tr>
+                  <th scope="row">AT-Mem without STI</th>
+                  <td>4.08</td><td>71.4</td><td>63.6</td><td>56.1</td>
+                  <td>4.59</td><td>62.4</td><td>52.7</td><td>69.8</td>
+                </tr>
+                <tr class="ours">
+                  <th scope="row">Full AT-Mem</th>
+                  <td>3.85</td><td>74.5</td><td>66.2</td><td>58.8</td>
+                  <td>4.32</td><td>65.7</td><td>56.9</td><td>72.4</td>
+                </tr>
+                <tr class="group-start">
+                  <th class="block-name" scope="rowgroup" rowspan="3">Reasoning</th>
+                  <th scope="row">Dense CoT</th>
+                  <td>3.79</td><td>75.1</td><td>66.8</td><td>59.3</td>
+                  <td>4.25</td><td>66.1</td><td>57.4</td><td>72.8</td>
+                </tr>
+                <tr>
+                  <th scope="row">Fixed interval (1/3)</th>
+                  <td>4.46</td><td>67.6</td><td>60.1</td><td>52.8</td>
+                  <td>5.10</td><td>58.9</td><td>50.0</td><td>65.9</td>
+                </tr>
+                <tr class="ours">
+                  <th scope="row">Adaptive (ours)</th>
+                  <td>3.85</td><td>74.5</td><td>66.2</td><td>58.8</td>
+                  <td>4.32</td><td>65.7</td><td>56.9</td><td>72.4</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="review-table-note">
+            Pixel-to-3D improves SFT-only SR by 24.8/25.2 points on R2R-CE/RxR-CE.
+            Local advantages add 4.1/4.2 points over global-only GRPO, and annealed
+            guidance adds another 2.8/3.1 points.
+          </p>
+        </div>
+
+        <div class="review-table-block">
+          <p class="table-caption">
+            <span class="tab-label">Table 6.</span>
+            MultiNav-CoT supervision study. All variants use the same 90k trajectories,
+            action labels, Qwen2.5-VL-7B student, and one-epoch SFT budget without GRPO;
+            only the CoT supervision source changes.
+          </p>
+          <p class="mobile-scroll-hint">Swipe horizontally to inspect all metrics&nbsp;&rarr;</p>
+          <div class="table-scroll detailed-table teacher-table" tabindex="0">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col" rowspan="2">SFT supervision</th>
+                  <th class="metric-group" scope="colgroup" colspan="4">R2R-CE val-unseen</th>
+                  <th class="metric-group" scope="colgroup" colspan="4">RxR-CE val-unseen</th>
+                </tr>
+                <tr>
+                  <th scope="col">NE&nbsp;&darr;</th>
+                  <th scope="col">OS&nbsp;&uarr;</th>
+                  <th scope="col">SR&nbsp;&uarr;</th>
+                  <th scope="col">SPL&nbsp;&uarr;</th>
+                  <th scope="col">NE&nbsp;&darr;</th>
+                  <th scope="col">SR&nbsp;&uarr;</th>
+                  <th scope="col">SPL&nbsp;&uarr;</th>
+                  <th scope="col">nDTW&nbsp;&uarr;</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Action only (no CoT)</th>
+                  <td>5.31</td><td>57.0</td><td>50.6</td><td>45.0</td>
+                  <td>6.71</td><td>46.1</td><td>39.8</td><td>56.2</td>
+                </tr>
+                <tr>
+                  <th scope="row">Qwen2.5-VL-7B CoT</th>
+                  <td>5.46</td><td>55.7</td><td>49.4</td><td>43.1</td>
+                  <td>6.83</td><td>44.8</td><td>38.2</td><td>54.9</td>
+                </tr>
+                <tr>
+                  <th scope="row">GLM-4.5V-108B CoT</th>
+                  <td>4.99</td><td>60.8</td><td>54.4</td><td>48.9</td>
+                  <td>6.24</td><td>51.2</td><td>44.9</td><td>60.8</td>
+                </tr>
+                <tr class="ours">
+                  <th scope="row">Gemini 2.5 Flash CoT</th>
+                  <td>4.88</td><td>62.0</td><td>55.7</td><td>50.3</td>
+                  <td>6.10</td><td>52.4</td><td>46.2</td><td>62.1</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="review-table-note">
+            Weak CoT supervision falls below action-only SFT, while the open-weight
+            GLM-4.5V-108B teacher approaches Gemini 2.5 Flash on both benchmarks.
+          </p>
+        </div>
+      </div>
+
+      <div class="page-width evidence-strip">
+        <dl class="evidence-grid">
+          <div>
+            <dd>90k / 700k</dd>
+            <dt>training trajectories / interactions</dt>
+            <p>763k trajectories for DualVLN; 3.37M interactions for NavFoM</p>
+          </div>
+          <div>
+            <dd>9</dd>
+            <dt>policy interactions per trajectory</dt>
+            <p>approximately 30 for StreamVLN and DualVLN</p>
+          </div>
+          <div>
+            <dd>16.58 s</dd>
+            <dt>average task time on one A800</dt>
+            <p>37.47 s StreamVLN; 41.46 s DualVLN</p>
+          </div>
+          <div>
+            <dd>&minus;2.8 pp</dd>
+            <dt>SR at depth noise &sigma; = 0.2</dt>
+            <p>closed-loop re-evaluation corrects single-step geometric error</p>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <!-- ===================== 5. Qualitative ===================== -->
+    <section class="section" id="qualitative" aria-labelledby="qualitative-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">5</p>
+          <h2 id="qualitative-title">Qualitative Results</h2>
+          <p class="section-summary">
+            Pixel waypoints and sparse reasoning transfer from continuous simulation to
+            an unmapped real-world environment.
+          </p>
+        </div>
+
+        <figure class="example-figure">
+          <button
+            class="figure-button"
+            type="button"
+            data-lightbox="img/simulation_trajectory.png"
+            data-caption="Figure 4. A simulated trajectory showing multi-view pixel actions and reasoning at task-relevant decision points."
+            aria-label="Open Figure 4, the simulation trajectory, at full size"
+            title="Open full-size figure"
+          >
+            <img
+              src="img/simulation_trajectory.png"
+              alt="Simulation trajectory with multi-view observations, selected pixel waypoints, and sparse reasoning traces"
+              width="2205"
+              height="2178"
+              loading="lazy"
+            >
+            <span class="zoom-mark" aria-hidden="true">+</span>
+          </button>
+          <figcaption>
+            <span class="fig-label">Figure 4.</span>
+            Simulation. The agent reasons around the staircase and the task transition,
+            while routine movement proceeds through direct pixel actions.
+          </figcaption>
+        </figure>
+
+        <div class="real-world-grid">
+          <figure>
+            <button
+              class="figure-button"
+              type="button"
+              data-lightbox="img/real_world_trajectory.png"
+              data-caption="Figure 5. A zero-shot real-world trajectory in an unmapped environment."
+              aria-label="Open Figure 5, the real-world trajectory, at full size"
+              title="Open full-size figure"
+            >
+              <img
+                src="img/real_world_trajectory.png"
+                alt="Six-step real-world robot trajectory following an instruction to reach a display and cabinet"
+                width="1819"
+                height="921"
+                loading="lazy"
+              >
+              <span class="zoom-mark" aria-hidden="true">+</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Figure 5.</span>
+              Representative zero-shot execution in an unmapped real environment on a
+              Unitree Go2 robot, without real-robot fine-tuning.
+            </figcaption>
+          </figure>
+
+          <figure>
+            <button
+              class="figure-button"
+              type="button"
+              data-lightbox="img/real_world_success.png"
+              data-caption="Figure 6. Real-world success rates over 100 blind trials: StreamVLN 49.0%, DualVLN 53.0%, and Embodied-Navigator 60.0%."
+              aria-label="Open Figure 6, the real-world success chart, at full size"
+              title="Open full-size figure"
+            >
+              <img
+                src="img/real_world_success.png"
+                alt="Bar chart showing real-world success rates of 49 percent for StreamVLN, 53 percent for DualVLN, and 60 percent for Embodied-Navigator"
+                width="1600"
+                height="1338"
+                loading="lazy"
+              >
+              <span class="zoom-mark" aria-hidden="true">+</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Figure 6.</span>
+              Success rate across 100 blind trials run by an independent operator in
+              unmapped indoor and outdoor environments, with human-annotated instructions;
+              success is stopping within 1.5&nbsp;m of the target. Embodied-Navigator 60.0% versus
+              StreamVLN 49.0% and DualVLN 53.0%. All baselines use the same Unitree Go2
+              hardware, four-camera RGB setup, D435i depth camera, Hesai LiDAR for dense
+              depth and localization (FastLIO odometry), and FAR Planner for local obstacle
+              avoidance. Task distribution and failure-mode analysis are provided in the
+              manuscript (Appendix D). Representative deployment videos are shown below.
+            </figcaption>
+          </figure>
+        </div>
+
+        <h3 class="video-heading" id="videos">Real-World Deployment Videos</h3>
+        <p class="block-note video-intro">
+          Representative trials from the 100-episode real-world evaluation on the
+          Unitree Go2 quadruped, executed zero-shot in unmapped environments. Success
+          examples are shown first; a representative failure case is shown last.
+        </p>
+
+        <div class="video-grid">
+          <figure class="deployment-video">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/cross-scenario.mp4"
+              data-caption="Video 1. Cross-scenario navigation with indoor-to-outdoor transition."
+              aria-label="Play Video 1, cross-scenario navigation, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/cross-scenario.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 1.</span>
+              Cross-scenario navigation with indoor-to-outdoor transition.
+            </figcaption>
+          </figure>
+
+          <figure class="deployment-video">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/hall.mp4"
+              data-caption="Video 2. Indoor hall navigation with long-corridor reasoning."
+              aria-label="Play Video 2, indoor hall navigation, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/hall.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 2.</span>
+              Indoor hall navigation with long-corridor reasoning.
+            </figcaption>
+          </figure>
+
+          <figure class="deployment-video">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/meeting-room.mp4"
+              data-caption="Video 3. Meeting-room navigation."
+              aria-label="Play Video 3, meeting-room navigation, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/meeting-room.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 3.</span>
+              Meeting-room navigation.
+            </figcaption>
+          </figure>
+
+          <figure class="deployment-video">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/outdoors.mp4"
+              data-caption="Video 4. Outdoor scene navigation."
+              aria-label="Play Video 4, outdoor scene navigation, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/outdoors.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 4.</span>
+              Outdoor scene navigation.
+            </figcaption>
+          </figure>
+
+          <figure class="deployment-video">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/playground.mp4"
+              data-caption="Video 5. Indoor laboratory test-area navigation."
+              aria-label="Play Video 5, indoor laboratory test-area navigation, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/playground.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 5.</span>
+              Indoor laboratory test-area navigation.
+            </figcaption>
+          </figure>
+
+          <figure class="deployment-video failure-case">
+            <button
+              class="video-button"
+              type="button"
+              data-lightbox-video="img/outdoors-failed.mp4"
+              data-caption="Video 6. Outdoor navigation failure: at the final step, the robot happens to move to a position where the target object is no longer visible in any camera view. The policy hallucinates that it has reached the goal and prematurely issues a stop action."
+              aria-label="Play Video 6, outdoor navigation failure case, enlarged"
+              title="Play enlarged"
+            >
+              <video preload="metadata" muted playsinline tabindex="-1" width="1280" height="1380">
+                <source src="img/outdoors-failed.mp4" type="video/mp4">
+              </video>
+              <span class="play-mark" aria-hidden="true">&#9654;</span>
+            </button>
+            <figcaption>
+              <span class="fig-label">Video 6.</span>
+              Outdoor navigation failure: at the final step, the robot happens to move to
+              a position where the target object is no longer visible in any camera view.
+              The policy hallucinates that it has reached the goal and prematurely issues
+              a stop action.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 6. BibTeX ===================== -->
+    <section class="section section-alt" id="bibtex" aria-labelledby="bibtex-title">
+      <div class="page-width">
+        <div class="section-head">
+          <p class="section-number">6</p>
+          <h2 id="bibtex-title">BibTeX</h2>
+        </div>
+
+        <div class="bibtex-block">
+          <button class="bibtex-copy" type="button" data-copy-target="bibtex-source">Copy</button>
+          <pre id="bibtex-source"><code>@inproceedings{feng2026embodiednavigator,
+  title     = {Embodied-Navigator: Point, Think, Memorize, and Align
+               for Efficient Embodied Navigation},
+  author    = {Feng, Hongyan and Chen, Sunlai and Liu, Xuanyu and Pan, Miao and
+               Xie, Yangfan and Cui, Yuxiang and Zhou, Zhongxiang and
+               Xiong, Rong and Zhang, Wenqi and Yin, Jianwei and
+               Zhuang, Yueting and Zhang, Xuhong},
+  year      = {2026}
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== Artifact scope ===================== -->
+    <section class="section artifact-section" id="artifact" aria-labelledby="artifact-title">
+      <div class="page-width artifact-grid">
+        <div>
+          <p class="artifact-kicker">Open research</p>
+          <h2 id="artifact-title">Repository contents</h2>
+        </div>
+        <div>
+          <p>
+            This repository contains the navigation policy, the navigation-adapted VLM,
+            SFT and Two-Level GRPO training code, the continuous-navigation environment
+            and evaluation harness, the MultiNav-CoT processing pipeline with a
+            data subset, and the real-robot serving interfaces.
+          </p>
+          <p>
+            <strong>Key dependencies:</strong> The method is trained on MultiNav-CoT, a
+            90k-trajectory dataset with Gemini 2.5 Flash–generated Chain-of-Thought
+            annotations. The Two-Level GRPO rewards use simulator signals (geodesic distance,
+            oracle success, SPL) that require adaptation for real-world training. The full
+            system uses depth for pixel-to-3D projection and odometry for Space-Time
+            Indicator encoding, though the VLM observes RGB only.
+          </p>
+          <p>
+            The released
+            <a href="https://huggingface.co/UnderTides/Embodied-Navigator-7B-GRPO">Embodied-Navigator-7B-GRPO
+            checkpoint</a> is available on Hugging Face. The full licensed simulation assets,
+            complete training corpus, additional deployment videos, manuscript, and paper
+            source are distributed separately and are not part of this repository.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="page-width">
+      <p>Embodied-Navigator &middot; No tracking, no external requests</p>
+      <a href="#top">Back to top</a>
+    </div>
+  </footer>
+
+  <div class="lightbox" data-lightbox-dialog hidden role="dialog" aria-modal="true" aria-label="Expanded research figure">
+    <button class="lightbox-close" type="button" data-lightbox-close aria-label="Close expanded figure" title="Close">&times;</button>
+    <div class="lightbox-content">
+      <img data-lightbox-image src="" alt="">
+      <video data-lightbox-player controls playsinline preload="metadata" hidden></video>
+      <p data-lightbox-caption></p>
+    </div>
+  </div>
+</body>
+</html>
