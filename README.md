@@ -104,10 +104,6 @@ Embodied-Reasoner exceeds OpenAI o1 by **+9%**, o3-mini by **+24%**, and Claude-
 
 ## 🧭 Embodied-Navigator
 
-<p align="center">
-  <img src="embodied_navigator/docs/img/architecture.png" width="92%" alt="Embodied-Navigator architecture">
-</p>
-
 <div align="center">
 
 **Point, Think, Memorize, and Align for Efficient Embodied Navigation**
@@ -127,6 +123,10 @@ https://github.com/user-attachments/assets/695b83b4-7672-4d77-ac5b-dc455258e036
 ### What it does
 
 Instead of asking a VLM to regress 3D coordinates or emit long strings of atomic actions, Embodied-Navigator lets it act as a **visual pointer**: pick one of four RGB views, point at a pixel, and let a SLAM controller execute the projected 3D waypoint.
+
+<p align="center">
+  <img src="embodied_navigator/docs/img/architecture.png" width="92%" alt="Embodied-Navigator architecture">
+</p>
 
 | Component | Mechanism | Effect |
 |---|---|---|
