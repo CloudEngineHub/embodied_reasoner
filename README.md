@@ -15,6 +15,7 @@ A series of open-source projects on embodied reasoning and interaction from
 | Project | Description | Paper | Resources |
 |---|---|---|---|
 | [**Embodied-Reasoner**](./embodied_reasoner/) | A multimodal embodied model extending o1-style deep reasoning to interactive tasks in AI2-THOR: object search, manipulation, and transportation. ACL 2026 Main. | [ACL 2026](https://aclanthology.org/2026.acl-long.1910/) · [arXiv:2503.21696](https://arxiv.org/abs/2503.21696) | [Project page](https://embodied-reasoner.github.io) · [Dataset](https://huggingface.co/datasets/zwq2018/embodied_reasoner) |
+| [**Embodied-Navigator**](./embodied_navigator/) | A unified vision-language navigation framework aligning high-level visual reasoning with low-level physical execution through pixel waypoint prediction, selective reasoning, trajectory memory, and hierarchical reinforcement learning. | Coming soon | [Project page](https://zju-omniai.github.io/Embodied-Navigator/) · [Model](https://huggingface.co/UnderTides/Embodied-Navigator-7B-GRPO) |
 
 ## Repository layout
 
