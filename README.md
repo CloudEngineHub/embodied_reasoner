@@ -34,7 +34,7 @@ Two projects live here today, covering the two halves of physical-world competen
 | Project | One-line summary | Embodiment & benchmark | Status |
 |---|---|---|---|
 | 🔍 **[Embodied-Reasoner](./embodied_reasoner/)** | An **embodied reasoning model** for the physical world: it plans long-horizon tasks, reasons about the state of its environment, and reflects on its own actions while it keeps interacting. | Indoor agent in AI2-THOR (107 scenes) | **ACL 2026 Main** ✅ |
-| 🧭 **[Embodied-Navigator](./embodied_navigator/)** | A vision-language **navigation** framework: the VLM points at a pixel instead of regressing coordinates, thinks only at critical nodes, compresses history into anchors, and is aligned with Two-Level GRPO. | Habitat R2R-CE / RxR-CE + Unitree Go2 quadruped | **[arXiv:2608.17512](https://arxiv.org/abs/2608.17512)** |
+| 🧭 **[Embodied-Navigator](./embodied_navigator/)** | A vision-language **navigation** framework: the VLM points at a pixel instead of regressing coordinates, thinks only at critical nodes, compresses history into anchors, and is aligned with Two-Level GRPO. | Habitat R2R-CE / RxR-CE + Unitree Go2 quadruped | <a href="https://arxiv.org/abs/2608.17512"><img alt="arXiv" src="https://img.shields.io/badge/Paper-arXiv-B31B1B?logo=arxiv&logoColor=B31B1B"></a> |
 
 Common design principles across the series:
 
