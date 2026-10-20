@@ -11,6 +11,8 @@ from typing import Optional
 from enum import Enum
 import json
 
+from .language import validate_english_payload
+
 
 # ─── 枚举类型 ──────────────────────────────────────────────────
 
@@ -361,13 +363,16 @@ def episode_to_json(episode: Episode, indent: int = 2) -> str:
             return {k: convert(v) for k, v in asdict(obj).items() if v is not None}
         return obj
 
-    return json.dumps(convert(episode), indent=indent, ensure_ascii=False)
+    payload = convert(episode)
+    validate_english_payload(payload)
+    return json.dumps(payload, indent=indent, ensure_ascii=False)
 
 
 def save_episode(episode: Episode, path: str):
     """保存 Episode 到 JSON 文件"""
+    serialized = episode_to_json(episode)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(episode_to_json(episode))
+        f.write(serialized)
 
 
 def load_episode(path: str) -> dict:

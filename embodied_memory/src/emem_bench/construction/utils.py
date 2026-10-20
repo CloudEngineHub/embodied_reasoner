@@ -4,6 +4,7 @@ import json
 import os
 
 from .schema import Episode, save_episode as _save_episode_raw
+from .language import validate_english_payload
 from .scene_utils import get_room_type
 from .tasks import Task
 
@@ -81,8 +82,8 @@ def save_tasks_episode(
 
     episode = {
         "episode_id": episode_id,
-        "episode_name": f"{level}任务集 — {scene}",
-        "description": f"场景 {scene} 的 {level} 任务采样（seed={seed}）",
+        "episode_name": f"{level} task suite - {scene}",
+        "description": f"{level} task sampling in scene {scene} (seed={seed})",
         "difficulty": level,
         "hidden_rules": [],
         "memory_cues": [],
@@ -91,6 +92,7 @@ def save_tasks_episode(
     }
 
     out_path = os.path.join(ep_dir, f"{episode_id}.json")
+    validate_english_payload(episode)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(episode, f, ensure_ascii=False, indent=2)
     return out_path
@@ -126,8 +128,8 @@ def render_and_save_tasks(
     difficulty = DifficultyLevel.L0 if level == "L0" else DifficultyLevel.L1
     builder = EpisodeBuilder(
         episode_id=episode_id,
-        name=f"{level}任务集 — {scene}",
-        description=f"场景 {scene} 的 {level} 任务渲染（seed={seed}）",
+        name=f"{level} task suite - {scene}",
+        description=f"{level} task rendering in scene {scene} (seed={seed})",
         difficulty=difficulty,
     )
 

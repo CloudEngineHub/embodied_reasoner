@@ -131,9 +131,7 @@ def main(argv=None):
     offline.add_argument("--output", type=Path)
     run = subs.add_parser("evaluate", help="Run a model through the actual simulator")
     selection(run)
-    run.add_argument(
-        "--mode", choices=["full_context", "emem"], default="full_context"
-    )
+    run.add_argument("--mode", choices=["full_context", "emem"], default="full_context")
     run.add_argument(
         "--model", required=True, help="Served base model or trained checkpoint alias"
     )
@@ -155,6 +153,11 @@ def main(argv=None):
     score.add_argument("--episode", type=Path, required=True)
     score.add_argument("--probe-id", required=True)
     score.add_argument("--trajectory", type=Path, required=True)
+    score.add_argument(
+        "--world-state",
+        type=Path,
+        help="Final simulator state when not embedded in the trajectory",
+    )
     build = subs.add_parser(
         "construct", help="Generate one candidate task using the original generators"
     )
@@ -213,8 +216,23 @@ def main(argv=None):
             p for p in evaluator.get_probes() if p["probe_id"] == args.probe_id
         )
         trace = json.loads(args.trajectory.read_text())
-        actions = trace if isinstance(trace, list) else trace["model_actions"]
-        result = asdict(evaluator.evaluate_probe(probe, actions))
+        if isinstance(trace, list):
+            actions = trace
+        elif "model_actions" in trace:
+            actions = trace["model_actions"]
+        else:
+            actions = trace["result"]["model_actions"]
+        world_state = None
+        if args.world_state:
+            world_state = json.loads(args.world_state.read_text())
+        elif isinstance(trace, dict):
+            world_state = trace.get("final_world_state", trace.get("world_state"))
+        if world_state is None and probe.get("answerability") != "missing_evidence":
+            raise ValueError(
+                "Semantic scoring requires final simulator state: use a runner trace "
+                "containing final_world_state or provide --world-state"
+            )
+        result = asdict(evaluator.evaluate_probe(probe, actions, world_state))
     elif args.command == "construct":
         result = construct(args)
     else:

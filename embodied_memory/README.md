@@ -107,6 +107,9 @@ The public implementation provides transparent, representative experiments with 
 ```bash
 git clone https://github.com/ZJU-OmniAI/Embodied-Omni.git
 cd Embodied-Omni/embodied_memory
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e .
 ```
 
@@ -123,6 +126,15 @@ python -m pip install -e '.[sim,hub]'
 ```
 
 AI2-THOR requires its own rendering dependencies and a working graphics driver.
+On a headless Linux server the runner uses AI2-THOR CloudRendering and Vulkan. Set `AI2THOR_RENDER_GPU_DEVICE` to select a rendering GPU if needed. The first controller start downloads the Unity build unless it is already cached under `~/.ai2thor`.
+
+ProcTHOR episodes additionally require its scene dataset. Initialize the cache once before running them:
+
+```bash
+python -c "import prior; prior.load_dataset('procthor-10k')"
+```
+
+The benchmark then reads this cache in offline mode.
 
 ## Data
 
@@ -131,6 +143,7 @@ The complete 2,554-episode benchmark is available on [Hugging Face](https://hugg
 ```bash
 emem-bench download --repo-type dataset \
   --repo-id lzLiang/EmbodiedMemoryBench \
+  --revision 30fa72950fcb0143316dc55e8f9339ce0a95413d \
   --local-dir ../EmbodiedMemoryBench-Data
 ```
 
@@ -156,6 +169,22 @@ emem-bench inspect \
 ```
 
 The loader checks that manifest paths stay inside the data root and verifies episode hashes when they are present. Dataset paths are resolved from the configured data root.
+The loader also accepts the historical `benchmark_data/EmbodiedMemorizerBench-Full2554/` prefix in the released manifest when the episode files are directly under the downloaded data root.
+
+## Task construction
+
+Generate one candidate passive-observation task with the simulator:
+
+```bash
+emem-bench construct \
+  --data-root "$EMEM_DATA_ROOT" \
+  --family l2_passive \
+  --scene FloorPlan1 \
+  --noise-scene FloorPlan201 \
+  --output outputs/generated-passive
+```
+
+Use `l2_dynamic` or `l2_interaction` for the other L2 families. FloorPlan metadata is read from `EMEM_SCENE_METADATA_ROOT` when available, or captured from the simulator on demand. Experience-generalization construction (`l3_owner_habit`) additionally requires a `ConstraintRule` JSON file through `--rule` and example scenes through `--failure-scenes`. Generated candidates require quality auditing before release.
 
 ## Evaluation
 
@@ -182,6 +211,7 @@ emem-bench evaluate \
 ```
 
 Use `--all` only after a smoke run succeeds. Outputs contain per-episode traces, environment logs, and `summary.json`. The runner refuses to overwrite a non-empty output directory.
+Traces also include `final_world_state`, which is required for semantic offline scoring. Use `emem-bench score --episode EPISODE_JSON --probe-id PROBE_ID --trajectory TRACE_JSON` to rescore a runner trace. For a separate action list, provide the final simulator state with `--world-state STATE_JSON`; an action sequence alone cannot establish the final goal state.
 
 ## Repository layout
 

@@ -974,6 +974,18 @@ def extract_json_object(text: str) -> dict[str, Any]:
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
+            # Some chat gateways Markdown-escape punctuation even in JSON.
+            # Repair only unsupported escapes, keeping valid JSON backslashes
+            # (including Windows paths, quotes, and Unicode escapes) intact.
+            candidate = re.sub(
+                r"(?<!\\)((?:\\\\)*)\\([`*_{}\[\]()#+.!>|~-])",
+                r"\1\2",
+                candidate,
+            )
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
             missing_closers = candidate.count("{") - candidate.count("}")
             if missing_closers > 0 and candidate.rstrip().endswith("}"):
                 return json.loads(candidate + ("}" * missing_closers))

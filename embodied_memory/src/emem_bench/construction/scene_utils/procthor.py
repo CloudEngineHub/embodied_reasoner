@@ -157,6 +157,11 @@ def _controller_metadata(scene_input: str | dict) -> dict:
     )
     if platform:
         kwargs["platform"] = platform
+        from .simulator import _select_ai2thor_gpu
+
+        gpu_device, _ = _select_ai2thor_gpu()
+        if gpu_device is not None:
+            kwargs["gpu_device"] = gpu_device
     controller = Controller(**kwargs)
     try:
         return copy.deepcopy(controller.last_event.metadata)

@@ -110,7 +110,11 @@ def load_scene_metadata(scene: str | dict) -> dict:
     room_type = get_room_type(scene)
     folder = ROOM_TYPE_MAP[room_type]
     meta_path = os.path.join(METADATA_ROOT, folder, scene, "metadata.json")
-    return _load_json(meta_path)
+    if os.path.exists(meta_path):
+        return _load_json(meta_path)
+    # Scene snapshots are optional external assets in the code-only release.
+    # Capture the initial state from the simulator when no snapshot is present.
+    return load_procthor_metadata(scene)
 
 
 def load_agent_origin(scene: str | dict) -> dict:

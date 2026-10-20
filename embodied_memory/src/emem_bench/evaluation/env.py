@@ -381,6 +381,7 @@ class EmbodiedMemorizerEnv:
             "instruction": self.probe["instruction"] if self.probe else "",
             "initial_state_adjustments": self._initial_state_adjustments,
             "model_actions": self.model_actions,
+            "final_world_state": self._world_state_snapshot(),
             "episode_log": self.episode_log,
             "result": asdict(result) if result else None,
         }

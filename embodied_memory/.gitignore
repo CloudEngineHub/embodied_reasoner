@@ -23,3 +23,9 @@ outputs/
 
 # Original raster icon; README uses the converted SVG.
 assets/EMem_icon.png
+
+# Local verification tests; keep these files out of published changes.
+/tests/test_data.py
+/tests/test_model_json.py
+/tests/test_scene_metadata.py
+/tests/test_score_cli.py

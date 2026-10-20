@@ -149,6 +149,7 @@ def evaluate(rows, args):
                         "id": row["id"],
                         "family": row["family"],
                         "result": asdict(result),
+                        "final_world_state": env._world_state_snapshot(),
                         "errors": errors,
                         "infrastructure_failed": infrastructure_failed,
                         "calls": agent.calls if agent else calls,

@@ -16,6 +16,17 @@ def contained_path(root, value):
     path = (root / value).resolve()
     if not path.is_relative_to(root):
         raise ValueError(f"Path escapes dataset root: {value}")
+    # Early Full2554 manifests retained the research repository's directory
+    # prefix, while the downloaded release stores episodes/ at its root.
+    if not path.exists() and value.parts[:2] == (
+        "benchmark_data",
+        "EmbodiedMemorizerBench-Full2554",
+    ):
+        portable = (root / Path(*value.parts[2:])).resolve()
+        if not portable.is_relative_to(root):
+            raise ValueError(f"Path escapes dataset root: {value}")
+        if portable.is_file():
+            path = portable
     return path
 
 
